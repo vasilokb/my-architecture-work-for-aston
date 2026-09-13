@@ -1,0 +1,146 @@
+@startuml
+skinparam backgroundColor transparent
+skinparam linetype ortho
+skinparam nodesep 50
+skinparam ranksep 40
+
+title Реализация Row-Level Security (RLS) в облачной АБС
+
+' === КОМПОНЕНТЫ СИСТЕМЫ ===
+
+actor "Клиент (ДБО)" as client
+
+package "API Gateway" {
+  component "JWT Parser" as jwt_parser
+  component "Tenant Extractor" as tenant_extractor
+}
+
+package "Бизнес-сервис" {
+  component "TenantInterceptor" as interceptor
+  database "TenantContext\n(ThreadLocal)" as tenant_context
+  component "Service Layer" as service_layer
+  component "Repository" as repository
+}
+
+package "Connection Pool" {
+  component "TenantAwareDataSource" as data_source
+  component "Connection Wrapper" as connection_wrapper
+}
+
+database "PostgreSQL Cluster" as postgresql {
+  package "Схема: tenant_alfa" {
+    database "Таблица: clients" as table_clients_alfa
+    note right of table_clients_alfa
+      Данные:
+      id: 1, tenant_id: alfa, name: Иван
+      id: 2, tenant_id: alfa, name: Мария
+    end note
+    
+    component "RLS Policy" as rls_policy_alfa
+  }
+  
+  package "Схема: tenant_beta" {
+    database "Таблица: clients" as table_clients_beta
+    note right of table_clients_beta
+      Данные:
+      id: 3, tenant_id: beta, name: Петр
+      id: 4, tenant_id: beta, name: Анна
+    end note
+    
+    component "RLS Policy" as rls_policy_beta
+  }
+}
+
+component "Keycloak" as keycloak
+component "JWT Token" as jwt_token
+
+' === ПОТОК ДАННЫХ ===
+
+' 1. Аутентификация
+client -> jwt_parser : "1. HTTPS запрос с JWT"
+jwt_parser -> keycloak : "2. Валидация токена"
+keycloak --> jwt_parser : "3. Valid JWT"
+jwt_parser -> tenant_extractor : "4. Извлечение tenant_id"
+
+' 2. Обработка в бизнес-сервисе
+tenant_extractor -> interceptor : "5. REST API запрос\n(X-Tenant-ID: alfa)"
+interceptor -> tenant_context : "6. Установка tenant_id"
+tenant_context -> service_layer : "7. Бизнес-логика"
+service_layer -> repository : "8. Вызов репозитория"
+
+' 3. Работа с базой данных
+repository -> data_source : "9. Запрос соединения"
+data_source -> connection_wrapper : "10. Получение connection"
+connection_wrapper -> postgresql : "11. SET app.current_tenant = 'alfa'"
+
+' 4. Применение RLS
+postgresql -> rls_policy_alfa : "12. Проверка политики"
+rls_policy_alfa -> table_clients_alfa : "13. Запрос к таблице"
+table_clients_alfa --> rls_policy_alfa : "14. Данные с tenant_id = 'alfa'"
+rls_policy_alfa --> postgresql : "15. Отфильтрованные данные"
+postgresql --> connection_wrapper : "16. Результат SQL"
+connection_wrapper --> data_source : "17. Connection с результатами"
+data_source --> repository : "18. Результат запроса"
+repository --> service_layer : "19. Объекты домена"
+service_layer --> tenant_context : "20. Очистка ThreadLocal"
+tenant_context --> interceptor : "21. Завершение обработки"
+interceptor --> tenant_extractor : "22. REST API ответ"
+tenant_extractor --> client : "23. HTTP ответ"
+
+' === ПРИМЕР ИЗОЛЯЦИИ ===
+
+note right of table_clients_beta
+  <b>Пример изоляции:</b>
+  Если tenant_id = 'alfa',
+  запрос к tenant_beta.clients
+  вернет 0 записей
+end note
+
+' === ЛЕГЕНДА И КОНФИГУРАЦИЯ ===
+
+note top of postgresql
+  <b>PostgreSQL RLS Configuration:</b>
+  
+  ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
+  
+  CREATE POLICY tenant_isolation_policy
+  ON clients USING (tenant_id = 
+    current_setting('app.current_tenant', true));
+  
+  SET app.current_tenant = 'alfa';
+end note
+
+note bottom of interceptor
+  <b>Spring Configuration:</b>
+  
+  @Component
+  public class TenantInterceptor 
+    implements HandlerInterceptor {
+    
+    @Override
+    public boolean preHandle(...) {
+      String tenantId = extractFromJWT(request);
+      TenantContext.setCurrentTenant(tenantId);
+      return true;
+    }
+  }
+end note
+
+legend right
+  <b>Поток данных:</b>
+  1. Аутентификация
+  2. Извлечение tenant_id
+  3. Установка в ThreadLocal
+  4. Установка в БД
+  5. Применение RLS
+  6. Возврат данных
+  |
+  <b>Ключевые компоненты:</b>
+  • JWT токен с claim tenant_id
+  • ThreadLocal контекст
+  • TenantAwareDataSource
+  • RLS политики PostgreSQL
+end legend
+
+@enduml
+

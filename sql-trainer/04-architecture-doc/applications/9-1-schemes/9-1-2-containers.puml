@@ -1,0 +1,59 @@
+@startuml
+!include https://raw.githubusercontent.com/vasilokb/plantUML/refs/heads/main/C4.puml
+
+title Container View – SQL Trainer (исправленная версия)
+
+Person(learner, "Обучающийся", "Проходит курсы и решает задачи по SQL.")
+Person(methodist, "Методист / Руководитель", "Создаёт и сопровождает учебный контент, анализирует прогресс.")
+Person(admin, "Администратор", "Выполняет технические операции, импорт/экспорт задач и данных.")
+
+Boundary(company, "Корпоративный контур") {
+
+  Container(spa, "SQL Trainer UI", "React SPA", "Веб-интерфейс для обучающихся, методистов и администраторов.") #lightblue
+
+  Container(nginx, "Nginx / API Gateway", "Nginx", "Точка входа HTTP(S), терминация TLS, маршрутизация запросов к backend-сервисам.") #lightgray
+
+  Boundary(k8s, "Kubernetes Cluster – Backend Services") {
+    Container(users_svc, "Users/Auth Service", "Java, Spring Boot", "Работа с пользователями и ролями в контексте тренажёра.") #lightgreen
+    Container(courses_svc, "Courses/Tasks Service", "Java, Spring Boot", "Управление курсами, модулями и задачами.") #lightgreen
+    Container(exec_svc, "Execution Service", "Java, Spring Boot", "Выполнение учебных SQL-запросов над Training DB и возврат результата проверки.") #lightgreen
+    Container(progress_svc, "Progress/Reporting Service", "Java, Spring Boot", "Запись истории попыток, расчёт прогресса и базовая отчётность.") #lightgreen
+  }
+
+  ContainerDb(app_db, "App DB", "PostgreSQL", "Сервисные данные: пользователи, курсы, задачи, история попыток, отчётность.") #wheat
+  ContainerDb(training_db, "Training DB", "PostgreSQL", "Учебные схемы и учебные наборы данных для выполнения SQL-запросов.") #wheat
+}
+
+System_Ext(keycloak, "SSO / Keycloak", "Корпоративная SSO-система (OIDC/OAuth2), интегрирована с AD.")
+System_Ext(ad, "Active Directory", "Корпоративный каталог пользователей и групп.")
+
+' Пользователи работают с UI
+Rel(learner, spa, "Работает через браузер", "HTTPS")
+Rel(methodist, spa, "Работает через браузер", "HTTPS")
+Rel(admin, spa, "Работает через браузер", "HTTPS")
+
+' UI ходит к backend через Nginx
+Rel(spa, nginx, "REST API-запросы", "HTTPS")
+Rel(nginx, users_svc, "Маршрутизация API-запросов", "HTTP(S)")
+Rel(nginx, courses_svc, "Маршрутизация API-запросов", "HTTP(S)")
+Rel(nginx, exec_svc, "Маршрутизация API-запросов", "HTTP(S)")
+Rel(nginx, progress_svc, "Маршрутизация API-запросов", "HTTP(S)")
+
+' Взаимодействия backend-сервисов друг с другом
+
+Rel_R(exec_svc, progress_svc, "Передача результатов проверок для записи истории", "HTTP(S)")
+
+' Backend <-> DB
+Rel(users_svc, app_db, "Чтение/запись данных о пользователях и ролях", "JDBC")
+Rel(courses_svc, app_db, "Чтение/запись курсов, модулей и задач", "JDBC")
+Rel(progress_svc, app_db, "Чтение/запись истории попыток и агрегатов", "JDBC")
+
+Rel(exec_svc, training_db, "Выполнение учебных SQL-запросов", "JDBC")
+
+' Интеграция с SSO/AD
+Rel_R(spa, keycloak, "Аутентификация пользователей, редиректы", "HTTPS (OIDC)")
+Rel_R(keycloak, ad, "Проверка учётных данных, получение атрибутов", "LDAP/LDAPS")
+
+
+
+@enduml

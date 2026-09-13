@@ -1,0 +1,96 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - Career Aggregator System
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' === АКТОРЫ ===
+Person(careerConsultant, "Карьерный Консультант", "Администратор системы. Управляет доступом уволенных сотрудников, мониторит активность, администрирует платформу")
+
+Person(employee, "Уволенный Сотрудник", "Конечный пользователь. Ищет релевантные вакансии по своей специальности и навыкам. Доступ ограничен 2 месяцами и 2 запросами в день")
+
+' === СИСТЕМА ===
+System_Boundary(careerAggregator, "Career Aggregator System") {
+
+    ' === ВЕБ-ПРИЛОЖЕНИЕ ===
+    Container(webApp, "Web Application", "React/Vue.js", "Пользовательский интерфейс для выбора IT-специальностей и навыков, просмотра вакансий")
+
+    ' === API ШЛЮЗ ===
+    Container(apiGateway, "API Gateway", "Node.js/Express", "Обработка запросов, аутентификация, маршрутизация, rate limiting")
+
+    ' === СЕРВИСЫ ПОИСКА ===
+    Container(searchService, "Search Service", "Python/FastAPI", "Семантический поиск вакансий, ранжирование по релевантности")
+
+    Container(vectorizationService, "Vectorization Service", "Python/FastAPI", "Векторизация запросов пользователей и вакансий через AI Engine")
+
+    Container(cachingService, "Caching Service", "Python/FastAPI", "Кэширование результатов поиска, инвалидация кэша")
+
+    ' === СЕРВИС АГРЕГАЦИИ ===
+    Container(sourceAdapterService, "Source Adapter Service", "Python", "Агрегация вакансий из любых внешних источников (HeadHunter, LinkedIn, Indeed, Telegram), нормализация данных")
+
+    ' === АДМИНИСТРАТИВНЫЙ СЕРВИС ===
+    Container(adminService, "Admin Service", "Node.js/Express", "Управление пользователями, мониторинг активности, администрирование платформы")
+
+    ' === БАЗЫ ДАННЫХ ===
+    ContainerDb(userDb, "User Database", "PostgreSQL", "Хранение данных пользователей, выбранных специальностей и навыков, профилей")
+
+    ContainerDb(vacancyDb, "Vacancy Database", "PostgreSQL + Elasticsearch", "Хранение и индексация вакансий, полнотекстовый поиск")
+
+    ContainerDb(cacheDb, "Cache", "Redis", "Кэширование результатов запросов, сессии пользователей")
+
+    ' === AI ДВИЖОК ===
+    Container(aiEngine, "AI Engine", "Python/PyTorch + Ollama", "Локальная нейросеть (LLaMA) для семантического анализа запросов и векторизации вакансий")
+}
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(headHunter, "HeadHunter API", "Внешний API для получения вакансий. Ограничение: 2000 вакансий за запрос")
+
+System_Ext(linkedIn, "LinkedIn API", "Внешний API для получения вакансий (будущая интеграция)")
+
+System_Ext(indeed, "Indeed API", "Внешний API для получения вакансий (будущая интеграция)")
+
+System_Ext(telegram, "Telegram Боты/Каналы", "Парсинг вакансий из Telegram каналов и ботов (будущая интеграция)")
+
+System_Ext(llmProvider, "LLM Провайдер (Fallback)", "OpenRouter или другие бесплатные модели для fallback при недоступности локальной модели")
+
+System_Ext(authProvider, "Провайдер Аутентификации", "OAuth 2.0 / JWT для аутентификации пользователей")
+
+' === СВЯЗИ АКТОРОВ С СИСТЕМОЙ ===
+Rel(careerConsultant, webApp, "Администрирует, управляет доступом, мониторит активность", "HTTPS")
+Rel(employee, webApp, "Выбирает специальность и навыки, получает релевантные вакансии", "HTTPS")
+
+' === СВЯЗИ ВНУТРИ СИСТЕМЫ ===
+Rel(webApp, apiGateway, "Шаг 3: Отправляет поисковый запрос", "HTTPS/REST")
+Rel(apiGateway, searchService, "Шаг 4: Передает поисковый запрос", "HTTPS/REST")
+Rel(apiGateway, adminService, "Административные запросы", "HTTPS/REST")
+Rel(apiGateway, userDb, "Шаг 1: Сохраняет профиль пользователя", "TCP")
+Rel(apiGateway, cacheDb, "Шаг 2: Сохраняет сессию", "TCP")
+
+' === СВЯЗИ СЕРВИСОВ ПОИСКА ===
+Rel(searchService, vectorizationService, "Шаг 5: Вызывает векторизацию запроса", "HTTPS/REST")
+Rel(searchService, cachingService, "Шаг 4: Проверяет кэш, Шаг 8: Сохраняет результаты", "HTTPS/REST")
+Rel(searchService, vacancyDb, "Шаг 7: Ищет вакансии", "TCP/REST")
+Rel(searchService, sourceAdapterService, "Шаг 6: Вызывает для получения вакансий из внешних источников", "HTTPS/REST")
+Rel(vectorizationService, aiEngine, "Шаг 5: Векторизирует запрос через LLM", "HTTPS/REST")
+Rel(cachingService, cacheDb, "Шаг 8: Кэширует результаты", "TCP")
+
+' === СВЯЗИ СЕРВИСА АГРЕГАЦИИ ===
+Rel(sourceAdapterService, vacancyDb, "Шаг 6: Сохраняет вакансии", "TCP")
+Rel(sourceAdapterService, vectorizationService, "Шаг 7: Вызывает векторизацию вакансий", "HTTPS/REST")
+
+' === СВЯЗИ АДМИНИСТРАТИВНОГО СЕРВИСА ===
+Rel(adminService, userDb, "Управление пользователями", "TCP")
+
+' === СВЯЗИ С ВНЕШНИМИ СИСТЕМАМИ ===
+Rel(sourceAdapterService, headHunter, "Шаг 6: Получает вакансии", "HTTPS")
+Rel(sourceAdapterService, linkedIn, "Планируется интеграция", "HTTPS")
+Rel(sourceAdapterService, indeed, "Планируется интеграция", "HTTPS")
+Rel(sourceAdapterService, telegram, "Планируется интеграция", "HTTPS")
+Rel(aiEngine, llmProvider, "Шаг 5: Fallback при недоступности локальной модели", "HTTPS/REST")
+Rel(apiGateway, authProvider, "Шаг 2: Валидация токенов", "HTTPS")
+
+@enduml

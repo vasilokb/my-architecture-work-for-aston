@@ -1,0 +1,212 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title AI Document Analysis Platform — MVP (Queue concurrency to LLM, Kafka-ready note)
+
+skinparam {
+  shadowing false
+  defaultFontSize 12
+  titleFontSize 14
+  titleFontStyle bold
+  wrapWidth 200
+}
+
+AddBoundaryTag("frontend", $bgColor="lightblue", $fontColor="darkblue", $borderColor="darkblue", $shadowing="false")
+AddBoundaryTag("backend", $bgColor="lightyellow", $fontColor="darkorange", $borderColor="darkorange", $shadowing="false")
+AddBoundaryTag("db", $bgColor="lightgreen", $fontColor="darkgreen", $borderColor="darkgreen", $shadowing="false")
+AddBoundaryTag("external", $bgColor="lightgray", $fontColor="gray", $borderColor="gray", $shadowing="false")
+
+' Используем LAYOUT_TOP_DOWN для лучшего контроля
+LAYOUT_TOP_DOWN()
+
+System_Boundary(system, "AI Document Analysis Platform") {
+
+  ' --- Верхний ряд: Frontend и Gateway ---
+  Container_Boundary(fe, "Frontend (React)", $tags="frontend") {
+    Component(ui_upload, "Upload Module", "React", "Выбор PDF, загрузка, прогресс")
+    Component(ui_run, "Run Module", "React", "Запуск режима: alternative / reestimate")
+    Component(ui_status, "Status & Versions", "React", "documentId, статус, версии, ошибки")
+    Component(ui_table1, "Table 1 Editor", "React", "User Stories + критерии + NFR(perf) + сущности/объёмы")
+    Component(ui_table2, "Table 2 Viewer", "React", "Оценки по ролям + PERT")
+    Component(ui_export, "Export Module", "React", "Скачивание Excel")
+    Component(ui_api, "API Client", "JS/HTTP", "Вызовы backend, обработка ошибок")
+  }
+
+  ' Gateway и Auth в отдельной строке
+  Container(api_gw, "API Gateway", "HTTP API", "Единая точка входа\nПроверка доступа\nМаршрутизация")
+  Container(keycloak, "Keycloak", "Auth", "Аутентификация/авторизация")
+  Container(user_svc, "User Service", "Backend Service", "Пользователь/права/настройки")
+
+  ' --- Центральный ряд: Основные сервисы обработки ---
+  ' Processing Service слева
+  Container_Boundary(ps, "Processing Service", $tags="backend") {
+    Component(ps_doc, "Document Registry", "Business Logic", "Создание documentId\nУправление версиями")
+    Component(ps_state, "Process State Store", "SQL", "Устойчивое состояние процесса")
+    Component(ps_guard, "Guardrails", "Rules", "Проверки перед запуском")
+    Component(ps_flow, "Orchestration Flow", "Business Logic", "Оркестрация процесса")
+  }
+
+  ' Queue Service в центре
+  Container_Boundary(qs, "Queue Service", $tags="backend") {
+    Component(qs_store, "Queue Store", "SQL", "Очередь job + lock/lease")
+    Component(qs_limit, "Concurrency Limiter", "Rules", "Ограничение параллельности к LLM")
+    Component(qs_retry, "Retry Policy", "Rules", "Правила повторов + backoff")
+    Component(qs_dispatch, "Dispatcher", "Business Logic", "Выполнение job из очереди")
+  }
+
+  ' File Service справа
+  Container_Boundary(fs, "File Service", $tags="backend") {
+    Component(fs_presign, "Presign Issuer", "Business Logic", "Подготовка загрузки")
+    Component(fs_store, "Object Storage Adapter", "MinIO SDK", "Работа с объектами")
+    Component(fs_extract, "PDF Text Extractor", "pypdf", "Читает PDF из MinIO")
+    Component(fs_meta, "File Metadata Store", "SQL", "Метаданные файла")
+  }
+
+  ' --- Нижний ряд: AI и Analysis сервисы ---
+  ' Prompt Service слева
+  Container_Boundary(prs, "Prompt Service", $tags="backend") {
+    Component(prs_presets, "Prompt Presets Store", "SQL", "Пресеты под режимы")
+    Component(prs_builder, "Prompt Builder", "Business Logic", "Строит запрос к LLM")
+    Component(prs_call, "LLM Client", "HTTP", "Фактический вызов LLM API")
+    Component(prs_raw, "Raw Output Store", "SQL", "Хранит raw ответ LLM")
+  }
+
+  ' Analysis Service в центре
+  Container_Boundary(as, "Analysis Service", $tags="backend") {
+    Component(as_schema, "Schema Validator", "jsonschema", "Проверяет JSON контракт")
+    Component(as_quality, "Quality Gate", "Rules", "Контроль качества результата")
+    Component(as_est, "Estimator", "Rules", "Считает оценки")
+    Component(as_compose, "Result Composer", "Business Logic", "Собирает финальный результат")
+    Component(as_repo, "Analysis Store", "SQL", "Пишет версии результата")
+  }
+
+  ' Result Service справа
+  Container_Boundary(rs, "Result Service", $tags="backend") {
+    Component(rs_access, "Result Access", "Business Logic", "Доступ к данным результата")
+    Component(rs_excel, "Excel Exporter", "openpyxl", "Генерация .xlsx")
+    Component(rs_store, "Result Store", "SQL", "Хранение результатов по версиям")
+  }
+}
+
+' --- Внешние системы справа ---
+Boundary(ext, "External Systems", $tags="external") {
+  System_Ext(minio, "S3 / MinIO", "Object Storage")
+  System_Ext(llm_api, "LLM API", "External API")
+  System_Ext(llm, "LLM (Ollama)", "Model")
+}
+
+' --- Базы данных слева ---
+Boundary(dbs, "Databases (PostgreSQL)", $tags="db") {
+  ContainerDb(db_user, "User DB", "PostgreSQL", "Пользователи/права")
+  ContainerDb(db_process, "Process DB", "PostgreSQL", "documentId/версии/прогресс")
+  ContainerDb(db_queue, "Queue DB", "PostgreSQL", "Очередь job + lock/lease")
+  ContainerDb(db_files, "Files DB", "PostgreSQL", "fileId/fileKey + метаданные")
+  ContainerDb(db_prompt, "Prompt DB", "PostgreSQL", "Шаблоны + raw ответы LLM")
+  ContainerDb(db_result, "Result DB", "PostgreSQL", "Результаты + Excel")
+}
+
+' -------- relationships (упорядоченные для читаемости) --------
+
+' UI -> Gateway (горизонтальные связи)
+Rel(ui_upload, ui_api, "Upload", "HTTP")
+Rel(ui_run, ui_api, "Start", "HTTP")
+Rel(ui_status, ui_api, "Status", "HTTP")
+Rel(ui_table1, ui_api, "Save + reestimate", "HTTP")
+Rel(ui_export, ui_api, "Download Excel", "HTTP")
+Rel(ui_api, api_gw, "Calls", "HTTP JSON")
+
+' Auth and user management
+Rel(api_gw, keycloak, "Auth check", "HTTP")
+Rel(api_gw, user_svc, "User/profile", "HTTP")
+Rel(user_svc, db_user, "CRUD", "SQL")
+
+' Start process flow (вертикальные связи вниз)
+Rel(api_gw, ps_doc, "Create/start", "HTTP")
+Rel(ps_doc, ps_guard, "Validate input")
+Rel(ps_guard, ps_flow, "Allow/deny")
+Rel(ps_doc, ps_state, "Update state")
+Rel(ps_state, db_process, "Persist", "SQL")
+
+' Orchestration to services (горизонтальные)
+Rel(ps_flow, fs_extract, "Get text", "HTTP")
+Rel(ps_flow, qs_store, "Enqueue job", "HTTP")
+Rel(ps_flow, ps_state, "Update progress")
+
+' File service internal (вертикальные)
+Rel(fs_presign, fs_meta, "Create record")
+Rel(fs_presign, fs_store, "Generate URL")
+Rel(fs_store, minio, "PUT/GET", "S3 API")
+Rel(fs_extract, fs_store, "Read PDF", "S3 API")
+Rel(fs_extract, fs_meta, "Update text")
+Rel(fs_meta, db_files, "Persist", "SQL")
+
+' Queue service flow (центрированные связи)
+Rel(qs_store, db_queue, "Persist", "SQL")
+Rel(qs_dispatch, qs_store, "Take job + lock")
+Rel(qs_dispatch, qs_limit, "Request slot")
+Rel(qs_dispatch, ps_state, "Update status", "SQL")
+Rel(qs_retry, qs_store, "Requeue/backoff")
+Rel(qs_dispatch, qs_retry, "Error context")
+
+' Prompt processing (нижний ряд)
+Rel(qs_dispatch, prs_builder, "Build prompt", "HTTP")
+Rel(prs_builder, prs_presets, "Read preset", "SQL")
+Rel(prs_presets, db_prompt, "Persist", "SQL")
+Rel(prs_builder, prs_call, "Call LLM", "HTTP")
+Rel(prs_call, llm_api, "Chat/Generate", "HTTP")
+Rel(llm_api, llm, "Inference", "API")
+Rel(prs_call, prs_raw, "Save raw", "SQL")
+Rel(prs_raw, db_prompt, "Persist", "SQL")
+
+' Analysis pipeline (центральный поток)
+Rel(qs_dispatch, as_schema, "Validate JSON", "HTTP")
+Rel(as_schema, as_quality, "Pass valid object")
+Rel(as_quality, as_est, "Normalized input")
+Rel(as_est, as_compose, "Scores/summary")
+Rel(as_compose, as_repo, "Save version")
+Rel(as_repo, db_result, "Persist", "SQL")
+Rel(as_repo, db_prompt, "Refs to raw", "SQL")
+
+' Result and Excel (правый поток)
+Rel(as_compose, rs_access, "Publish result", "HTTP")
+Rel(rs_access, rs_store, "Read/Write")
+Rel(rs_store, db_result, "Persist", "SQL")
+Rel(rs_access, rs_excel, "Generate Excel")
+Rel(rs_excel, rs_store, "Read result data", "SQL")
+Rel(rs_excel, rs_store, "Write export meta", "SQL")
+
+' Визуальные улучшения - группировка связей
+note right of qs_limit
+  <b>Concurrency Control:</b>
+  • Max parallel LLM requests
+  • Backpressure mechanism
+  • <color:gray>Kafka-ready: Queue can be replaced with Kafka consumer groups</color>
+end note
+
+note left of as_schema
+  <b>Quality Gates:</b>
+  • Strict JSON schema validation
+  • No garbage in results
+  • Reproducible analysis
+end note
+
+note right of ui_table1
+  <b>Core Artifact:</b>
+  Table 1 contains:
+  • User Stories
+  • Acceptance criteria
+  • NFR (performance)
+  • Entities/volumes
+  Editable → Reestimate
+end note
+
+' Легенда для понимания цветов
+legend bottom
+  <color:darkblue><b>Color Legend</b></color> |
+  <back:lightblue> Frontend </back> |
+  <back:lightyellow> Backend Services </back> |
+  <back:lightgreen> Databases </back> |
+  <back:lightgray> External Systems </back>
+end legend
+
+@enduml

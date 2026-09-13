@@ -1,0 +1,210 @@
+@startuml
+title Архитектура MVP Career Planner — v1.2.0\nобновление по дорожной карте 08.09.2026
+
+top to bottom direction
+
+skinparam shadowing false
+skinparam linetype ortho
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam ArrowColor #455A64
+skinparam defaultTextAlignment center
+skinparam NoteBackgroundColor #FFF8DC
+skinparam NoteBorderColor #B38B00
+
+actor "Пользователь\n(бывший сотрудник РФ / РБ)" as User
+actor "Карьерный консультант" as Consultant
+
+package "Публичный контур" #41ABE0 {
+    component "Веб-шлюз / nginx\nHTTPS, rate limiting\n(конкретное решение — ADR-004)" as Gateway
+
+    component "Веб-интерфейс\n\nЛичный кабинет пользователя\nАдмин-панель консультанта" as Web
+}
+
+package "Закрытый контур. Backend — модульный монолит (FastAPI)" #52F280 {
+
+    component "API / оркестрация\nпользовательских сценариев" as API
+
+    package "Домен: Доступ и профиль" #E8F5E9 {
+
+        component "Авторизация и доступ\n\nРоли USER / CAREER_CONSULTANT\nВход, выход, смена пароля\n(принудительная при первом входе)\nАвтоблокировка через 2 мес" as Access
+
+        component "Профиль пользователя\n\nФИО, контакты, страна РФ / РБ\nКатегория Лаборант / ПП\nОдна специализация (технология)\nUser Key Skills — выбор из справочника\nОпыт работы — только аналитика,\nв матчинге НЕ участвует" as Profile
+
+        component "Управление данными\n\nПродление / блокировка\nОбезличивание через 6 мес\n(история сохраняется)" as Retention
+    }
+
+    package "Домен: Справочник навыков" #E8F5E9 {
+
+        component "Справочник\n\nНавык + краткое описание\nСпециализации\nНаполняется вручную\nАлиасы из Цербера" as Taxonomy
+    }
+
+    package "Домен: Вакансии (пайплайн)" #E8F5E9 {
+
+        component "Фоновые задания\n\nОтдельный worker-процесс\n(того же образа, compose)\n\nРучной запуск (Pre-MVP)\nЕжедневный автозапуск (MVP)\nМодель эмбеддингов живёт здесь,\nне в веб-процессе" as Jobs
+
+        component "Адаптер источника\nвакансий (Port)" as VacancyAdapter
+
+        component "Обогащение\n\nОчистка soft skills\nИзвлечение Vacancy Key Skills (LLM)\nМаппинг названий на справочник" as Enrichment
+
+        component "Адаптер LLM\n\nTimeout / retry\nСтруктурированный ответ" as LLMAdapter
+
+        component "Векторизация\n\nКонкатенация Название + Описание\nиз справочника\nМногоязычная модель (ADR-002)" as Embedding
+
+        component "Каталог вакансий\n\nНормализация, дедупликация\nАктуальность" as Vacancies
+    }
+
+    package "Домен: Матчинг" #E8F5E9 {
+
+        component "Матчинг\n\nПредфильтр User Technology =\nVacancy Technology\n+ pgvector similarity\n% соответствия по навыкам" as Matching
+    }
+
+    package "Домен: Аналитика" #E8F5E9 {
+
+        component "Аналитика\n\nСобытия с первого дня:\nвходы, просмотры, клики,\nотклики, генерации списков\nТаблицы метрик в админке" as Analytics
+    }
+}
+
+database "Raw DB\n(PostgreSQL)\n\nВакансии «как пришли»\nБез изменений" as RawDB
+
+database "Application PostgreSQL\n+ pgvector\n\nУчётки, доступ, профили\nСправочник + векторы навыков\nВакансии + векторы\nСобытия аналитики" as AppDB
+
+component "Хранилище секретов\n\nКлючи интеграций\nПароли сервисов" as Secrets
+
+component "Мониторинг и логи\n\nМетрики, ошибки, аудит\nБез персональных данных" as Monitoring
+
+package "Внешние системы" #EAF252 {
+    interface "I: Источник вакансий\nединый контракт" as SourcePort
+
+    cloud "C.E.R.B.E.R.\nGreenplum, v_vacancies\nSELECT-only\n\nДоступ предоставлен 10.09\n(ADR-001 — решён)" as CERBER
+
+    cloud "HH.ru API\n\nРезерв\n(не требуется)" as HH
+
+    cloud "LLM API\n\nПровайдер не выбран\n(ADR-003)" as LLM
+}
+
+' ===== Вход пользователей =====
+User --> Gateway : HTTPS\nВход, профиль, список вакансий
+Consultant --> Gateway : HTTPS\nПользователи, доступ, аналитика
+Gateway --> Web : Веб-интерфейс
+Gateway --> API : API-запросы
+Web ..> API : REST / JSON
+
+' ===== API и домены =====
+API --> Access : Авторизация, RBAC
+API --> Profile : Онбординг, редактирование
+API --> Matching : Сформировать список вакансий
+API --> Analytics : Клиентские события
+
+Access --> AppDB : Учётки, роли, сроки
+Profile --> AppDB : Профиль, навыки, опыт
+Taxonomy --> AppDB : Справочник, описания, векторы
+Vacancies --> AppDB : Нормализованные вакансии
+Matching --> AppDB : Результаты, % соответствия
+Analytics --> AppDB : События, агрегаты
+Retention --> AppDB : Статусы, обезличивание
+
+' ===== Домен «Вакансии»: пайплайн =====
+Jobs --> VacancyAdapter : Запуск приёма
+VacancyAdapter --> SourcePort
+SourcePort --> CERBER : Базовый источник (решён)
+SourcePort ..> HH : Резерв (не требуется)
+CERBER --> VacancyAdapter : Вакансии (JSON / файл)
+VacancyAdapter --> RawDB : Сохранить «как есть»
+
+Jobs --> Enrichment : Запуск обогащения
+Enrichment --> RawDB : Читать исходные
+Enrichment --> LLMAdapter : Текст вакансии
+LLMAdapter --> LLM : HTTPS / JSON
+LLM --> LLMAdapter : Vacancy Key Skills
+Enrichment --> Taxonomy : Маппинг названий навыков
+Enrichment --> Embedding : Название + Описание
+Embedding --> AppDB : Вакансии + векторы навыков
+
+' ===== Домен «Матчинг»: зависимости от других доменов =====
+Matching --> Profile : Технология, User Key Skills
+Matching --> Taxonomy : Векторы навыков пользователя
+Matching --> Vacancies : Кандидаты после предфильтра
+
+' ===== Эксплуатация =====
+Jobs --> Retention : Сроки, обезличивание
+Jobs --> Analytics : Расчёт агрегатов
+API --> Monitoring : Запросы, ошибки
+Jobs --> Monitoring : Задания, ошибки
+API --> Secrets : Конфигурация
+Jobs --> Secrets : Конфигурация
+
+note right of Profile
+  Подтверждено PO (08.09):
+  - раздела «О себе» нет;
+  - опыт работы не участвует
+    в матчинге, только аналитика;
+  - навыки только из справочника,
+    произвольного ввода нет;
+  - специализация одна.
+end note
+
+note right of Matching
+  Подтверждено прототипом
+  (prototype-vector):
+
+  - каждый навык — отдельный вектор;
+  - каждое требование вакансии
+    сравнивается с лучшим навыком
+    пользователя (MAX);
+  - среднее по требованиям = %;
+  - предфильтр по технологии ДО
+    векторного поиска.
+
+  Формула и пороги — согласование
+  с PO на примерах.
+end note
+
+note bottom of VacancyAdapter
+  Система зависит от контракта
+  «источник отдаёт вакансии», а не
+  от конкретного CERBER / HH.
+
+  Смена источника = новая
+  реализация адаптера,
+  остальная схема не меняется.
+end note
+
+note bottom of RawDB
+  Дорожная карта, Pre-MVP п.5:
+  данные от источника сохраняются
+  в Raw DB без изменений,
+  обработка — отдельный этап.
+end note
+
+note right of Taxonomy
+  Дорожная карта, Pre-MVP п.6:
+  эмбеддинг = конкатенация
+  «Название + Описание» навыка
+  из справочника.
+
+  Прототип показал: модель
+  all-MiniLM-L6-v2 не работает
+  с русскими описаниями —
+  нужна многоязычная (ADR-002).
+
+  Справочник — единственный
+  домен, в который пишут
+  остальные только на чтение.
+end note
+
+legend top
+|= <#Gray> Цвет |= <#Gray> Статус |
+|<#52F280> Зелёный | <#52F280> Подтверждённый контур MVP (дорожная карта 08.09) |
+|<#E8F5E9> Светло-зелёный | <#E8F5E9> Домен внутри монолита |
+|<#41ABE0> Синий | <#41ABE0> Публичная точка входа |
+|<#EAF252> Жёлтый | <#EAF252> Открытое архитектурное решение — см. ADR в architecture.md |
+|= <#Gray> Термин |= <#Gray> Обозначение |
+|<#FFFFFF> Домен | <#FFFFFF> Группа модулей с общей ответственностью; общение между доменами — через публичный интерфейс |
+|<#FFFFFF> Port / Адаптер | <#FFFFFF> Прослойка, изолирующая систему от конкретного внешнего API |
+|<#FFFFFF> Пунктирная стрелка | <#FFFFFF> Альтернативный / резервный вариант связи |
+|<#FFFFFF> ADR | <#FFFFFF> Architecture Decision Record — зафиксированное открытое решение |
+|<#FFFFFF> Лаборант / ПП | <#FFFFFF> Категории пользователей из HR-учёта |
+endlegend
+
+@enduml

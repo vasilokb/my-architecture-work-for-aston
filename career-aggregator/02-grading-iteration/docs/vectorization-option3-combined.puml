@@ -1,0 +1,38 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Вариант 3: Комбинированный подход (sentence-transformers + OpenRouter) - Диаграмма компонентов
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' === КОМПОНЕНТЫ СИСТЕМЫ ===
+Component(vectorizationService, "Vectorization Service", "Python/FastAPI", "Получает текстовый запрос и возвращает вектор")
+
+Component(fallbackManager, "Fallback Manager", "Python", "Управляет fallback логикой между локальной моделью и OpenRouter")
+
+Component(localModel, "Local Model", "sentence-transformers", "Локальная модель для создания эмбеддингов (all-MiniLM-L6-v2)")
+
+Component(modelManager, "Model Manager", "Python", "Управление загрузкой и использованием локальной модели")
+
+Component(openrouterClient, "OpenRouter Client", "Python", "Клиент для работы с OpenRouter API")
+
+Component(cacheManager, "Cache Manager", "Python", "Кэширование векторов в Redis")
+
+ComponentDb(redis, "Redis", "Redis", "Хранилище кэшированных векторов")
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(openrouter, "OpenRouter API", "Внешний LLM API для векторизации (fallback)")
+
+' === СВЯЗИ ===
+Rel(vectorizationService, fallbackManager, "Запрос на векторизацию", "HTTPS/REST")
+Rel(fallbackManager, modelManager, "Попытка локальной векторизации", "HTTPS/REST")
+Rel(modelManager, localModel, "Использует модель для инференса", "Python")
+Rel(fallbackManager, openrouterClient, "Fallback при ошибке локальной модели", "HTTPS/REST")
+Rel(openrouterClient, openrouter, "Запрос на векторизацию", "HTTPS/REST")
+Rel(vectorizationService, cacheManager, "Сохраняет/получает векторы", "HTTPS/REST")
+Rel(cacheManager, redis, "Кэширование векторов", "TCP")
+
+@enduml

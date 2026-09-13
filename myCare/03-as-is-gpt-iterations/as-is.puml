@@ -1,0 +1,122 @@
+@startuml
+!include https://raw.githubusercontent.com/vasilokb/plantUML/refs/heads/main/C4.puml
+
+title Container View – MyCare Insurance (AS-IS)
+
+' ==== Персоны ====
+Person(client,      "Клиент-физлицо", "Оформляет и оплачивает полисы, подает заявления на страховые случаи.")
+Person(corpClient,  "Корпоративный клиент", "Оформляет корпоративные страховые программы.")
+Person(moderator,   "Модератор", "Управляет контентом: новости, офисы, вакансии, отзывы.")
+Person(claims,      "Специалист по выплатам", "Рассматривает заявления на страховые случаи и проводит выплаты.")
+
+' ==== Корпоративный/облачный контур ====
+Boundary(cloud, "MyCare Insurance – Kubernetes Cluster") {
+
+  ' ----- Frontend (микрофронтенды страховой части) -----
+  Boundary(front, "Frontend (namespace front-ins)") {
+    Container(web_host, "Insurance WebApp / Microfrontends", "React (host, auth, insurance, corporate-insurance, private-cabinet, work-panel, admin-panel)", "Единый веб-интерфейс для клиентов, модераторов и специалистов по выплатам.") #lightblue
+  }
+
+  ' ----- API Gateway -----
+  Container(api_gw, "API Gateway", "Spring Cloud Gateway", "Единая точка входа, маршрутизация запросов и проверка токенов доступа.") #lightgray
+
+  ' ----- Backend: страховые микросервисы -----
+  Boundary(backend, "Backend services (namespace java-ins)") {
+
+    Container(user_svc,    "User Service",        "Java, Spring Boot", "Регистрация, аутентификация, личные данные и роли пользователей.") #lightgreen
+    Container(info_svc,    "Info Service",        "Python, Django REST", "Инфо о компании: офисы, новости, вакансии, отзывы.") #lightgreen
+
+    Container(dms_svc,     "DMS Service",         "Java, Spring Boot", "ДМС: полисы, заявки, пролонгация, страховые случаи.")
+    Container(risks_svc,   "Risks Service",       "Java, Spring Boot", "Страхование ответственности и рисков.")
+    Container(property_svc,"Property Service",    "Java, Spring Boot", "Страхование недвижимости.")
+    Container(travel_svc,  "Travel Service",      "Java, Spring Boot", "Страхование путешественников и авиации.")
+    Container(auto_svc,    "Auto Service",        "Java, Spring Boot", "Страхование авто, мото, прицепов.")
+
+    Container(doc_svc,     "Document Service",    "Java, Spring Boot", "Загрузка и хранение документов по полисам и страховым случаям.")
+    Container(notif_svc,   "Notification Service","Java, Spring Boot", "Формирование и отправка уведомлений и OTP-кодов.")
+    Container(pay_svc,     "Payment Service",     "Java, Spring Boot", "Инициирование и учёт онлайн-оплаты страховых полисов.")
+  }
+
+  ' ----- Хранилища внутри кластера -----
+  ContainerDb(pg_ins,   "Insurance DB (mycrdb)", "PostgreSQL", "Общие схемы: пользователи, полисы, заявки, страховые случаи, платежи, контент.")
+  ContainerDb(notif_db, "Notification DB",       "PostgreSQL", "Контактные данные (email/телефон), статусы и истории отправленных уведомлений.")
+  ContainerDb(doc_store,"Documents Store",       "MongoDB / MinIO", "Файлы и бинарные документы, загруженные пользователями.")
+  Container(cache,      "Cache",                 "Redis", "Кэш сессий, OTP и вспомогательных данных для ускорения операций.") #wheat
+
+System_Ext(kafka,        "Kafka Cluster",         "Apache Kafka", "Асинхронный обмен событиями между сервисами.")
+}
+
+' ==== Внешние/смежные системы ====
+System_Ext(keycloak,     "Keycloak",              "SSO / IAM", "Аутентификация и авторизация (OIDC/OAuth2).")
+ContainerDb(keycloak_db, "Keycloak DB",           "PostgreSQL", "Учётные записи, роли, конфигурация SSO.")
+
+
+System_Ext(notif_ext,    "Notification Providers","SMTP/SMS/Messengers", "Email, SMS, мессенджеры (Telegram, WhatsApp и др.).")
+System_Ext(psp,          "Payment Provider",      "External PSP", "Обработка онлайн-платежей по полисам, 3-D Secure, колбеки.")
+System_Ext(yamaps,       "Yandex Maps API",       "Картографический сервис", "Отображение офисов страховщика на карте.")
+
+' ==== Взаимодействие пользователей с WebApp ====
+Rel(client,     web_host,   "Работа с ЛК, оформление/оплата полисов, подача заявлений", "HTTPS")
+Rel(corpClient, web_host,   "Оформление корпоративных программ страхования", "HTTPS")
+Rel(moderator,  web_host,   "Управление контентом, модерация отзывов", "HTTPS")
+Rel(claims,     web_host,   "Обработка заявлений на страховые случаи", "HTTPS")
+
+' ==== WebApp ↔ API Gateway ====
+Rel(web_host, api_gw, "REST-запросы к backend-сервисам", "HTTPS")
+
+' ==== API Gateway ↔ Backend services ====
+Rel(api_gw, user_svc,      "Регистрация, логин, управление профилем", "HTTP/REST + JWT")
+Rel(api_gw, info_svc,      "Получение/изменение офисов, новостей, вакансий, отзывов", "HTTP/REST")
+Rel(api_gw, dms_svc,       "Операции по ДМС-полисам и заявлениям", "HTTP/REST")
+Rel(api_gw, risks_svc,     "Операции по страхованию рисков", "HTTP/REST")
+Rel(api_gw, property_svc,  "Операции по страхованию недвижимости", "HTTP/REST")
+Rel(api_gw, travel_svc,    "Операции по страхованию путешествий", "HTTP/REST")
+Rel(api_gw, auto_svc,      "Операции по автострахованию", "HTTP/REST")
+Rel(api_gw, doc_svc,       "Загрузка и скачивание документов", "HTTP/REST")
+Rel(api_gw, notif_svc,     "Запросы на отправку OTP и сервисных уведомлений", "HTTP/REST")
+Rel(api_gw, pay_svc,       "Инициирование и проверка оплаты полисов", "HTTP/REST")
+
+' ==== Backend ↔ базы данных ====
+Rel(user_svc,      pg_ins,    "Чтение/запись пользователей, ролей, связей с полисами", "JDBC/PostgreSQL")
+Rel(info_svc,      pg_ins,    "Хранение офисов, новостей, вакансий, настроек сайта", "JDBC/PostgreSQL")
+Rel(dms_svc,       pg_ins,    "Полисы и заявки по ДМС", "JDBC/PostgreSQL")
+Rel(risks_svc,     pg_ins,    "Полисы и заявки по рисковому страхованию", "JDBC/PostgreSQL")
+Rel(property_svc,  pg_ins,    "Полисы и заявки по недвижимости", "JDBC/PostgreSQL")
+Rel(travel_svc,    pg_ins,    "Полисы и заявки по путешествиям", "JDBC/PostgreSQL")
+Rel(auto_svc,      pg_ins,    "Полисы и заявки по автострахованию", "JDBC/PostgreSQL")
+Rel(pay_svc,       pg_ins,    "Транзакции по оплате полисов", "JDBC/PostgreSQL")
+
+Rel(doc_svc,       doc_store, "Хранение и чтение файлов и метаданных документов", "MongoDB / S3 API")
+Rel(notif_svc,     notif_db,  "Хранение контактов, шаблонов и статусов уведомлений", "JDBC/PostgreSQL")
+
+Rel(user_svc,      cache,     "Кэш OTP, сессий и вспомогательных данных", "Redis")
+Rel(api_gw,        cache,     "Кэш токенов и результатов аутентификации", "Redis")
+
+' ==== Аутентификация и авторизация через Keycloak ====
+Rel(web_host,  keycloak,   "Аутентификация пользователей (login/logout, OIDC)", "HTTPS")
+Rel(api_gw,    keycloak,   "Валидация JWT / introspection", "HTTPS")
+Rel(keycloak,  keycloak_db,"Хранение пользователей и ролей", "JDBC/PostgreSQL")
+
+' ==== Асинхронные события через Kafka и уведомления ====
+Rel(user_svc,     kafka,      "Публикация событий о пользователях (регистрация, изменения)", "Kafka (JSON)")
+Rel(dms_svc,      kafka,      "События по заявкам и полисам ДМС", "Kafka (JSON)")
+Rel(risks_svc,    kafka,      "События по страхованию рисков", "Kafka (JSON)")
+Rel(property_svc, kafka,      "События по страхованию недвижимости", "Kafka (JSON)")
+Rel(travel_svc,   kafka,      "События по страхованию путешествий", "Kafka (JSON)")
+Rel(auto_svc,     kafka,      "События по автострахованию", "Kafka (JSON)")
+Rel(info_svc,     kafka,      "События об изменении новостей/вакансий/офисов", "Kafka (JSON)")
+Rel(pay_svc,      kafka,      "События об успешной/неуспешной оплате полисов", "Kafka (JSON)")
+
+Rel(kafka,        notif_svc,  "Подписка на события, требующие отправки уведомлений", "Kafka (consumer)")
+Rel(notif_svc,    notif_ext,  "Отправка email/SMS/мессенджер-уведомлений и OTP", "SMTP / HTTPS API")
+Rel(notif_svc,    api_gw,     "Push-уведомления в WebApp (статусы полисов и заявлений)", "HTTPS")
+
+' ==== Интеграция с платёжным провайдером ====
+Rel(pay_svc,      psp,        "Инициирование платежей, запрос статуса", "HTTPS/REST")
+
+' ==== Интеграция с Яндекс.Картами ====
+Rel(info_svc,     yamaps,     "Передача координат офисов", "REST/JSON")
+Rel(yamaps,       web_host,   "Отображение карт и точек офисов", "HTTPS")
+
+@enduml
+

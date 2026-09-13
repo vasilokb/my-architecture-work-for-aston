@@ -1,0 +1,203 @@
+@startuml
+!theme plain
+
+title "Event-Driven Архитектура dms-insurance с Non-Blocking и Bulkhead"
+caption "Фокус: неблокирующие операции (non-blocking/async)\nГде уже реализовано (зелёный), где нужно добавить (красный)\nBulkhead сохранён для изоляции ресурсов"
+
+package "HTTP Layer" {
+  [InsuranceApplicationController]
+  note right of InsuranceApplicationController
+    <b>controller/insuranceapplication/</b>
+    --
+    • POST /applications
+    • PUT /applications/{id}/status
+    • GET /applications/{id}
+    --
+    <color:green>Уже non-blocking:</color> Возвращает ответ сразу после сохранения в БД и публикации события.
+  end note
+
+  [PolicyController]
+  note left of PolicyController
+    <b>controller/policy/</b>
+    --
+    • POST /policies
+    • PUT /policies/{id}/status
+    • GET /policies/{id}
+    --
+    <color:green>Уже non-blocking:</color> Основная логика в сервисе, ответ быстрый.
+  end note
+}
+
+package "Service Layer" {
+  [InsuranceApplicationService]
+  note right of InsuranceApplicationService
+    <b>service/insuranceapplication/</b>
+    --
+    Основные операции: валидация, сохранение, публикация события
+    --
+    <color:green>Уже non-blocking:</color> Сохранение в Outbox в той же транзакции, не ждёт отправки в Kafka.
+    --
+    <color:red>Добавить non-blocking:</color>
+    • Вызовы внешних сервисов (Feign) → WebClient (reactive) или @Async
+    • Если есть тяжёлые расчёты → @Async
+    --
+    <color:red>Bulkhead (оставляем):</color>
+    @Bulkhead(name="externalCalls", type=THREADPOOL)
+    Эффект: Защищает основной пул потоков от медленных внешних вызовов.
+  end note
+
+  [PolicyService]
+  note left of PolicyService
+    <b>service/policy/</b>
+    --
+    Проверка заявки, генерация полиса, публикация события
+    --
+    <color:green>Уже non-blocking:</color> Публикация события не блокирует (Outbox).
+    --
+    <color:red>Добавить non-blocking:</color>
+    • Расчёт премии (если появится) → @Async или reactive
+    • Внешние проверки → WebClient вместо Feign
+    --
+    <color:red>Bulkhead (оставляем):</color>
+    @Bulkhead(name="premiumCalc", type=SEMAPHORE)
+    Эффект: Ограничивает параллельные тяжёлые операции.
+  end note
+
+  [ClientService]
+  note bottom of ClientService
+    <b>service/</b>
+    --
+    Получение/обновление клиента
+    --
+    <color:red>Добавить non-blocking:</color>
+    • Вызовы к внешнему сервису клиентов → WebClient или @Async
+    --
+    <color:red>Bulkhead (оставляем):</color>
+    На методы вызова внешних API
+    Эффект: Изолирует клиентские вызовы от основного потока.
+  end note
+
+  [OutboxService]
+  note top of OutboxService
+    <b>service/outbox/</b>
+    --
+    <color:green>Уже non-blocking:</color> Сохранение в транзакции, не ждёт Kafka.
+  end note
+
+  [OutboxCleanupScheduler]
+  note bottom of OutboxCleanupScheduler
+    <b>service/outbox/</b>
+    --
+    @Scheduled — фоновая задача
+    --
+    <color:green>Уже non-blocking:</color> Работает в отдельном scheduler thread pool.
+    --
+    <color:green>Отправка в Kafka:</color> KafkaTemplate.send() — асинхронная (non-blocking).
+    --
+    <color:red>Bulkhead (опционально):</color> Если много топиков — изолировать отправку.
+  end note
+}
+
+package "Event System" {
+  database "Outbox Table" {
+    [Outbox Events]
+  }
+  note right of "Outbox Table"
+    <color:green>Уже non-blocking:</color> Не влияет на HTTP-поток.
+  end note
+
+  [Event Publisher]
+  note left of "Event Publisher"
+    Spring ApplicationEventPublisher
+    --
+    <color:red>Добавить non-blocking:</color>
+    Обернуть публикацию в @Async или TransactionalEventListener(phase = AFTER_COMMIT)
+    Цель: Освободить сервисный поток сразу после коммита транзакции.
+  end note
+
+  queue "Kafka Topics" {
+    [client-events]
+    [application-events]
+    [policy-events]
+  }
+  note right of "Kafka Topics"
+    <color:green>Уже non-blocking:</color> KafkaTemplate.send() — асинхронный.
+  end note
+
+  [ClientEventConsumer]
+  note left of ClientEventConsumer
+    @KafkaListener
+    --
+    <color:green>Уже non-blocking:</color> Работает в отдельном consumer thread pool.
+    --
+    <color:red>Добавить Bulkhead (если внутри тяжёлые операции):</color>
+    @Bulkhead на метод обработки.
+  end note
+}
+
+package "Data Layer" {
+  [InsuranceApplication\nRepository]
+  [Policy Repository]
+  [Client Repository]
+  [DmsProgram\nRepository]
+
+  note right of "Data Layer"
+    JPA/Hibernate — блокирующий доступ к БД
+    --
+    <color:red>Критическая доработка для non-blocking:</color>
+    Перейти на Spring Data R2DBC + ReactiveRepository
+    Или хотя бы HikariCP с увеличенным пулом (maximum-pool-size: 50+)
+    --
+    Цель: Потоки не будут блокироваться на ожидании БД при высокой нагрузке.
+  end note
+}
+
+package "External Systems" {
+  [External Services]
+  note top of "External Systems"
+    Вызовы через Feign (блокирующие)
+    --
+    <color:red>Добавить non-blocking:</color>
+    Заменить Feign на WebClient (reactive) или OpenFeign + @Async
+    + Bulkhead на эти вызовы
+  end note
+}
+
+' === ВЗАИМОДЕЙСТВИЯ ===
+
+[InsuranceApplicationController] --> [InsuranceApplicationService] : "1. Быстрый ответ"
+[PolicyController] --> [PolicyService]
+
+[InsuranceApplicationService] --> [InsuranceApplication\nRepository] : "2. Сохранение (blocking → доработать reactive)"
+[PolicyService] --> [Policy Repository]
+[PolicyService] --> [DmsProgram\nRepository]
+
+[InsuranceApplicationService] --> [Event Publisher] : "3. Публикация события\n<color:red>(добавить @Async)</color>"
+[PolicyService] --> [Event Publisher]
+
+[Event Publisher] --> [Outbox Events] : "4. Сохранение в Outbox (в транзакции)"
+
+[OutboxCleanupScheduler] --> [client-events] : "5. Асинхронная отправка (non-blocking)"
+[OutboxCleanupScheduler] --> [application-events]
+[OutboxCleanupScheduler] --> [policy-events]
+
+[client-events] --> [ClientEventConsumer] : "6. Обработка в consumer pool (non-blocking)"
+
+[InsuranceApplicationService] --> [External Services] : "<color:red>Внешние вызовы (добавить WebClient + Bulkhead)</color>"
+
+' === ЛЕГЕНДА ===
+skinparam component {
+  BackgroundColor<<HTTP>> #FFE4B5
+  BackgroundColor<<Service>> #D8BFD8
+  BackgroundColor<<Event>> #AFEEEE
+  BackgroundColor<<Data>> #98FB98
+  BackgroundColor<<External>> #FFB6C1
+}
+
+legend right
+  <color:green>Зелёный:</color> Уже неблокирующая операция
+  <color:red>Красный:</color> Нужно добавить non-blocking (WebClient, @Async, R2DBC)
+  Bulkhead: Оставлен для изоляции ресурсов (не делает non-blocking, но защищает от блокировок)
+endlegend
+
+@enduml

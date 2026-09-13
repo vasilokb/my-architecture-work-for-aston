@@ -1,0 +1,149 @@
+@startuml
+!theme plain
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+skinparam backgroundColor white
+skinparam component {
+  FontSize 11
+  BorderThickness 1
+}
+skinparam package {
+  BorderThickness 2
+  FontSize 14
+  FontStyle bold
+}
+
+title Архитектура My Care Insurance (v2.0) — Упрощенная схема без оркестратора
+
+package "Users & Entry" #D1E8FF {
+    actor "Admin" as Admin
+    actor "Agent" as Agent
+    actor "Client" as Client
+    [Load Balancer] as LB
+}
+
+package "Edge & Auth" #FFF2CC {
+    [API Gateway] as Gateway
+    [Keycloak] as Keycloak
+}
+
+package "Доменные сервисы (Core Domain)" #E1D5E7 {
+    [Application Service] as AppSvc
+    [Underwriting Service] as UnderSvc
+    [Policy Service] as PolicySvc
+    [Claim Service] as ClaimSvc
+    [Catalog Service] as CatalogSvc
+    [Product Details Service] as ProdDetSvc
+}
+
+package "Master Data" #FFE6CC {
+    [Client Service] as ClientSvc
+    [Employee Service] as EmployeeSvc
+}
+
+package "Read Model" #B3E5FC {
+    [ClientAggregator] as Aggregator
+}
+
+package "Supporting Services" #E1D5E7 {
+    [Payment Service] as PaySvc
+    [Document Service] as DocSvc
+    [Storage Service] as StorageSvc
+    [Notification Service] as NotifSvc
+}
+
+package "Infrastructure" #DAE8FC {
+    queue "Kafka" as Kafka
+    database "S3 Storage" as S3
+}
+
+package "External" #FFE6CC {
+    [Credit Bureaus] as ExtInfo
+    [Payment Gateways] as ExtPay
+}
+
+' --- НЕВИДИМЫЕ СВЯЗИ ДЛЯ ВЫРАВНИВАНИЯ ---
+Admin -[hidden]- Agent
+Agent -[hidden]- Client
+LB -[hidden]- Gateway
+Gateway -[hidden]- Keycloak
+
+AppSvc -[hidden]- UnderSvc
+UnderSvc -[hidden]- PolicySvc
+PolicySvc -[hidden]- ClaimSvc
+CatalogSvc -[hidden]- ProdDetSvc
+
+ClientSvc -[hidden]- EmployeeSvc
+EmployeeSvc -[hidden]- Aggregator
+
+PaySvc -[hidden]- DocSvc
+DocSvc -[hidden]- StorageSvc
+StorageSvc -[hidden]- NotifSvc
+
+' --- ОСНОВНЫЕ СВЯЗИ ---
+
+' Входной трафик
+Admin --> LB : HTTPS/REST
+Agent --> LB : HTTPS/REST
+Client --> LB : HTTPS/REST
+LB --> Gateway : Route traffic
+
+' Безопасность
+Gateway ..> Keycloak : Validate JWT
+ClientSvc <--> Keycloak : Sync user data
+EmployeeSvc <--> Keycloak : Sync roles
+
+' Прямые вызовы от Gateway
+Gateway --> AppSvc : API: Applications
+Gateway --> PolicySvc : API: Policies
+Gateway --> ClaimSvc : API: Claims
+
+' Потоки внутри Core Domain
+AppSvc --> UnderSvc : Risk assessment
+UnderSvc --> CatalogSvc : Get tariffs
+UnderSvc --> ProdDetSvc : Get object details
+UnderSvc --> ExtInfo : External scoring
+UnderSvc --> ClientSvc : Get client data
+
+PolicySvc --> DocSvc : Generate policy
+PolicySvc --> ProdDetSvc : Link policy details
+
+ClaimSvc --> PolicySvc : Verify coverage
+ClaimSvc --> DocSvc : Generate claim docs
+ClaimSvc --> PaySvc : Process payout
+
+' Каталог и детали
+CatalogSvc --> ProdDetSvc : Get templates
+
+' Документооборот
+DocSvc --> StorageSvc : Store files
+StorageSvc --> S3 : Persist files
+
+' Платежи
+PaySvc --> ExtPay : Process payment
+PaySvc --> PolicySvc : Update payment status
+
+' Событийная модель
+AppSvc --> Kafka : Application events
+UnderSvc --> Kafka : Underwriting events
+PolicySvc --> Kafka : Policy events
+ClaimSvc --> Kafka : Claim events
+PaySvc --> Kafka : Payment events
+
+' Потребители событий
+Kafka --> Aggregator : Update read model
+Kafka --> NotifSvc : Send notifications
+Kafka --> ClientSvc : Update history
+Kafka --> AppSvc : Process events
+Kafka --> PolicySvc : Process events
+Kafka --> ClaimSvc : Process events
+Kafka --> PaySvc : Process events
+
+' Агрегатор (CQRS)
+Aggregator --> ClientSvc : Sync data
+Aggregator --> PolicySvc : Get policies
+Aggregator --> ClaimSvc : Get claims
+
+@enduml

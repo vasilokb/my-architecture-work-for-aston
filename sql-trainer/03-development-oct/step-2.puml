@@ -1,0 +1,128 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+title SQL Trainer — Этап 2: Гибридная архитектура (Outbox Pattern)
+
+Person(trainee, "Trainee", "Пользуется тренажёром")
+
+System_Boundary(front, "Front [Software System]") {
+  Container(web, "WEB", "JavaScript, React", "UI для trainee")
+}
+
+Container(gw, "API Gateway", "Spring Cloud Gateway", "Единая точка входа\nRate limit, circuit breaker")
+
+Container(redis, "Redis", "Redis", "Rate limiting\nКеш схем БД\nКеш условий задач")
+
+System_Ext(kc, "Keycloak", "Software System", "Аутентификация и авторизация")
+
+' ===== Users =====
+System_Boundary(usersb, "Сервис Пользователи") {
+  Container(users, "Users", "Java", "Профили пользователей")
+  ContainerDb(usersdb, "Users DB", "PostgreSQL", "Профили пользователей")
+}
+
+' ===== Tasks =====
+System_Boundary(tasksb, "Сервис Задачи") {
+  Container(tasks_stmt, "Tasks — Формулировки", "Java", "Условия задач")
+  Container(tasks_ans,  "Tasks — Ответы", "Java", "Эталонные ответы")
+  Container(tasks_erd,  "Tasks — ERD", "Java", "Описание учебных схем")
+  ContainerDb(tasksdb,  "Tasks DB", "PostgreSQL", "Данные по задачам")
+}
+
+' ===== Progress =====
+System_Boundary(progb, "Сервис Прогресс") {
+  Container(progress, "Progress", "Java", "Учёт прогресса")
+  ContainerDb(progressdb, "Progress DB", "PostgreSQL", "Прогресс пользователей")
+}
+
+' ===== Execution (Outbox Pattern) =====
+System_Boundary(execb, "Сервис Выполнения") {
+  Container(exec_api, "Execution API", "Java", "Приём запросов\nВалидация SQL\nOutbox запись")
+
+  ContainerDb(execdb, "Exec DB", "PostgreSQL", "SUBMISSIONS(id, user_id, task_id, sql, status, created_at)\nИстория всех запросов")
+
+  Container(outbox_worker, "Outbox Worker", "Java", "Poll SUBMISSIONS WHERE status='received'\nПубликация в очередь")
+
+  Container(queue, "Message Queue", "RabbitMQ", "Очередь выполнения")
+
+  Container(exec_worker, "Execution Worker", "Java", "Пул потоков\nBulkhead паттерн\nОбработка SQL")
+}
+
+System_Ext(training_pg, "Training PostgreSQL", "Database", "Учебные схемы\nRead-only доступ")
+
+' ===== Relations =====
+Rel(trainee, web, "Пользуется")
+Rel(web, gw, "HTTP (REST)")
+
+' Gateway к сервисам
+Rel(gw, users, "REST")
+Rel(gw, tasks_stmt, "REST")
+Rel(gw, tasks_ans, "REST")
+Rel(gw, tasks_erd, "REST")
+Rel(gw, progress, "REST")
+Rel(gw, exec_api, "POST /exec/submit")
+
+' Rate limiting
+Rel(gw, redis, "Rate limit check", "HTTP")
+
+' Кеширование
+Rel(tasks_erd, redis, "Кеш ERD схем", "HTTP")
+Rel(tasks_stmt, redis, "Кеш условий задач", "HTTP")
+
+' Execution flow - OUTBOX PATTERN
+Rel(exec_api, execdb, "INSERT INTO SUBMISSIONS\n(status='received')", "JDBC")
+
+Rel(outbox_worker, execdb, "SELECT FROM SUBMISSIONS\nWHERE status='received'", "JDBC\nПериодический опрос")
+
+Rel(outbox_worker, queue, "Publish task message", "AMQP")
+
+Rel(outbox_worker, execdb, "UPDATE SUBMISSIONS\nSET status='queued'", "JDBC\nПосле публикации")
+
+Rel(queue, exec_worker, "Consume task", "AMQP")
+
+Rel(exec_worker, execdb, "UPDATE SUBMISSIONS\nSET status='executing'", "JDBC")
+
+Rel(exec_worker, training_pg, "Execute SQL query", "JDBC")
+
+Rel(exec_worker, execdb, "UPDATE SUBMISSIONS\nSET status='completed'", "JDBC")
+
+Rel(exec_worker, progress, "Notify completion", "REST")
+
+' Внешние интеграции
+Rel_R(web, kc, "OIDC login", "HTTPS")
+Rel_R(gw, kc, "JWT validation", "HTTPS")
+
+' Базы данных сервисов
+Rel(users, usersdb, "CRUD операции", "JDBC")
+Rel(tasks_stmt, tasksdb, "Чтение/запись условий", "JDBC")
+Rel(tasks_ans, tasksdb, "Чтение эталонов", "JDBC")
+Rel(tasks_erd, tasksdb, "Чтение схем", "JDBC")
+Rel(progress, progressdb, "Запись прогресса", "JDBC")
+
+note right of execdb
+**SUBMISSIONS TABLE:**
+• Полная история всех запросов
+• Статусы: received → queued → executing → completed
+• Аудит и наблюдаемость
+• Ничего не удаляется
+end note
+
+note right of outbox_worker
+**OUTBOX WORKER:**
+• Ищет записи со status='received'
+• Публикует в RabbitMQ
+• Обновляет статус на 'queued'
+• Гарантия доставки в очередь
+end note
+
+note right of redis
+**REDIS КЕШ:**
+• ERD схемы (читаются часто)
+• Условия задач (часто читаются)
+• Rate limit счетчики
+• Метаданные задач
+end note
+@enduml

@@ -1,0 +1,67 @@
+@startuml
+!include https://raw.githubusercontent.com/vasilokb/plantUML/refs/heads/main/C4.puml
+
+Person(user, "Пользователь", "Загружает файлы, вводит промпт, запускает AI-анализ, получает результат")
+
+Boundary(system, "AI Document Analysis Platform") {
+
+  Container(frontend, "Frontend", "React",    "Загрузка файлов\nЗапуск анализа\nОпрос статуса\nОтображение результата")
+
+  Container(api_gw, "API Gateway", "HTTP API",    "Принимает запросы от клиента\nМаршрутизирует в сервисы\nВозвращает ответы")
+
+  Container(keycloak, "Keycloak", "Auth", "Аутентификация/авторизация")
+  Container(user_svc, "User Service", "Backend Service", "Данные пользователя")
+  Container(processing, "Processing Service", "Backend Service", "Оркестратор процесса")
+  Container(file_svc, "File Service", "Backend Service", "Нормализация/чанки/доступ к файлам")
+  Container(prompt_svc, "Prompt Service", "Backend Service", "Промпт + вызов LLM API")
+  Container(analysis_svc, "Analysis Service", "Backend Service", "Парсинг + расчет + публикация результата")
+  Container(result_svc, "Result Service", "Backend Service", "Хранение итогового файла")
+}
+
+System_Ext(minio, "S3 / MinIO", "Object Storage")
+System_Ext(kafka, "Apache Kafka", "Message Broker")
+System_Ext(llm_api, "LLM API", "External API")
+System_Ext(llm, "LLM", "Model")
+
+ContainerDb(db_user, "User DB", "DB")
+ContainerDb(db_file, "File DB", "DB")
+ContainerDb(db_prompt, "Prompt DB", "DB")
+ContainerDb(db_analysis, "Analysis DB", "DB")
+ContainerDb(db_result, "Result DB", "DB")
+
+' --- User entry ---
+Rel(user, frontend, "Работа в интерфейсе")
+
+' --- Upload-url + start analysis via gateway ---
+Rel(frontend, api_gw, "/upload-url, /start-analysis, /results", "HTTP JSON")
+
+' --- Auth + user info ---
+Rel(api_gw, keycloak, "Проверка токена", "HTTP")
+Rel(api_gw, user_svc, "Данные пользователя", "HTTP")
+Rel(user_svc, db_user, "CRUD", "SQL")
+
+' --- Orchestration ---
+Rel(api_gw, processing, "Создать отчет", "HTTP")
+
+' --- Direct upload to storage (presigned URL) ---
+Rel(frontend, minio, "PUT загрузка файла (presigned URL)", "HTTP PUT")
+
+' --- Normalization path ---
+Rel(processing, file_svc, "Нормализация/чанки по fileId+fileKey", "HTTP")
+Rel(file_svc, minio, "Чтение исходного файла", "S3 API")
+Rel(file_svc, db_file, "Сохранение нормализованного текста/метаданных", "SQL")
+
+' --- LLM generation ---
+Rel(processing, prompt_svc, "Генерация документа (text+prompt+params)", "HTTP")
+Rel(prompt_svc, db_prompt, "Сохранение промпта/параметров", "SQL")
+Rel(prompt_svc, llm_api, "Запрос к LLM", "HTTP")
+Rel(llm_api, llm, "Вызов модели", "API")
+
+' --- Analysis + result persistence ---
+Rel(processing, analysis_svc, "Запуск анализа", "HTTP")
+Rel(analysis_svc, db_analysis, "Сохранение анализа", "SQL")
+Rel(analysis_svc, kafka, "Публикация результата", "Async")
+Rel(kafka, result_svc, "Доставка результата", "Async")
+Rel(result_svc, db_result, "Сохранение итогового файла", "SQL")
+
+@enduml

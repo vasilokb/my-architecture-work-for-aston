@@ -1,0 +1,231 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/25.0.2 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36" version="25.0.2">
+  <diagram id="async-contour" name="Асинхронный контур АБС">
+    <mxGraphModel dx="4572" dy="2596" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="n_bank" value="Банк-клиент&#xa;Idempotency-Key: request_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="650" y="-370" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="n_gw" value="API Gateway&#xa;auth · rate-limit · tenant_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="650" y="-160" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="g_facade" value="Асинхронный фасад" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacing=8;fontSize=14;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
+          <mxGeometry x="80" y="80" width="760" height="1040" as="geometry" />
+        </mxCell>
+        <mxCell id="n_api" value="Operations API&#xa;POST /async/operations&#xa;GET /{request_id}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="340" y="130" width="190" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="n_rcon" value="Result Consumer&#xa;consume async-results&#xa;UPDATE WHERE TASK_PUBLISHED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="610" y="520" width="190" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="n_db" value="async_operations&#xa;PK: tenant_id + request_id&#xa;ACCEPTED → TASK_PUBLISHED →&#xa;COMPLETED/FAILED → NOTIFIED" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="340" y="290" width="190" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="n_relay" value="Task Relay&#xa;poll ACCEPTED → publish&#xa;FOR UPDATE SKIP LOCKED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="650" y="300" width="170" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="n_whs" value="Webhook Sender (фоновый)&#xa;poll COMPLETED/FAILED&#xa;HTTPS + HMAC + event_id&#xa;ретраи → DLQ · успех → NOTIFIED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="340" y="620" width="190" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="n_dlqw" value="webhook_dead_letters" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="340" y="950" width="190" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="n_con" value="Consumer задач (стейтless)&lt;div&gt;&lt;br/&gt;&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="1030" y="70" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="g_kafka" value="Kafka (at-least-once)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacing=8;fontSize=14;fontStyle=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="1" vertex="1">
+          <mxGeometry x="960" y="310" width="1170" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="k_tasks" value="async-tasks&#xa;message_id · request_id · tenant_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="1000" y="430" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="k_results" value="async-results&#xa;message_id · request_id · result" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="1590" y="425" width="190" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="g_services" value="Сервисы (синхронные REST) — inbox по message_id" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacing=8;fontSize=14;fontStyle=1;fillColor=#f5f5f5;strokeColor=#666666;" parent="1" vertex="1">
+          <mxGeometry x="2210" y="20" width="290" height="640" as="geometry" />
+        </mxCell>
+        <mxCell id="n_cd" value="credit-decision&#xa;POST /api/v1/applications" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="2230" y="80" width="230" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="n_li" value="loan-issuance&#xa;POST /api/v1/loans/issue" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="2230" y="220" width="230" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="n_ls" value="loan-signing&#xa;/sign/initiate · /sign/confirm" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="2230" y="360" width="230" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="n_acc" value="accounting&#xa;POST /accounting/transactions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="2230" y="500" width="230" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="k_dlq_tasks" value="async-tasks.dlq" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="1260" y="430" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="k_dlq_results" value="async-results.dlq" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="1870" y="430" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="n_replay" value="Replay CLI / Admin UI&#xa;реплей с теми же id" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="520" y="1290" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="REST" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeWidth=2;strokeColor=#37474f;" parent="1" source="n_bank" target="n_gw" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="202 · GET статус" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeWidth=2;strokeColor=#37474f;entryX=0.5;entryY=0;entryDx=0;entryDy=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" parent="1" source="n_gw" target="n_api" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="670" y="-50" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_sync" value="синхронно REST" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeWidth=2;strokeColor=#37474f;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n_gw" target="g_services" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2355" y="-120" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="INSERT ACCEPTED → 202&#xa;дубль PK → тот же 202" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n_api" target="n_db" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="poll ACCEPTED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n_relay" target="n_db" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="publish" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n_relay" target="k_tasks" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="consume" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.25;entryY=1;entryDx=0;entryDy=0;" parent="1" source="k_tasks" target="n_con" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="REST + X-Message-Id&#xa;inbox: дубль → кэш ответа" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.15;entryDx=0;entryDy=0;" parent="1" source="n_con" target="g_services" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="publish ответ" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n_con" target="k_results" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1195" y="210" />
+              <mxPoint x="1685" y="210" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="consume" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="k_results" target="n_rcon" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1685" y="570" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="UPDATE status, result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.855;entryY=1;entryDx=0;entryDy=-2.9;entryPerimeter=0;" parent="1" source="n_rcon" target="n_db" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="503" y="570" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e14" value="poll COMPLETED/FAILED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#555555;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="1" source="n_whs" target="n_db" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="вебхук&#xa;HTTPS + HMAC + event_id" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeWidth=2;strokeColor=#37474f;exitX=0;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n_whs" target="n_bank" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="20" y="668" />
+              <mxPoint x="20" y="-320" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e16" value="исчерпание ретраев" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#b85450;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" parent="1" source="n_whs" target="n_dlqw" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="DLQ задач&#xa;+ FAILED в async-results" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#b85450;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="n_con" target="k_dlq_tasks" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1140" y="250" />
+              <mxPoint x="1370" y="250" />
+            </Array>
+            <mxPoint x="180" y="950" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="битые результаты" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#b85450;entryX=0.5;entryY=1;entryDx=0;entryDy=0;exitX=0.75;exitY=1;exitDx=0;exitDy=0;" parent="1" source="n_rcon" target="k_dlq_results" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="753" y="830" />
+              <mxPoint x="1980" y="830" />
+            </Array>
+            <mxPoint x="1590" y="1190" as="sourcePoint" />
+            <mxPoint x="1320" y="1300" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e17" value="реплей задач" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=11;strokeColor=#999999;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" parent="1" source="n_replay" target="k_tasks" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="630" y="1180" />
+              <mxPoint x="1095" y="1180" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e18" value="перезапуск доставки" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=11;strokeColor=#999999;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="n_replay" target="n_whs" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="630" y="680" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="async-contour-desc" name="Описание схемы">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="1800" math="0" shadow="0">
+      <root>
+        <mxCell id="d0" />
+        <mxCell id="d1" parent="d0" />
+
+        <mxCell id="t_title" value="&lt;b&gt;Асинхронный контур АБС — идемпотентная обработка операций&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=20;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="40" width="1080" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t_purpose" value="&lt;b&gt;Назначение&lt;/b&gt;&lt;br&gt;Контур принимает операции банка, которые не требуют синхронного ответа (пики нагрузки, массовые операции),&lt;br&gt;выполняет их через бизнес-сервисы и возвращает результат вебхуком. Гарантии: без потерь (at-least-once),&lt;br&gt;без двойных бизнес-операций (идемпотентность на каждом шаге), банк всегда может узнать статус по request_id." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;spacing=6;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="100" width="1080" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t_flow_h" value="&lt;b&gt;Поток операции&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="230" width="1080" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t_flow" value="1. &lt;b&gt;Банк → API Gateway → Operations API&lt;/b&gt;: POST /api/v1/async/operations c заголовком Idempotency-Key: request_id.&lt;br&gt;2. &lt;b&gt;Operations API&lt;/b&gt;: INSERT в async_operations (ACCEPTED) в одной транзакции; 202 возвращается только после коммита.&lt;br&gt;     Дубль request_id падает о PK (tenant_id + request_id) — банк получает тот же 202, второй задачи не возникает.&lt;br&gt;3. &lt;b&gt;Task Relay&lt;/b&gt; (фон): поллит ACCEPTED (FOR UPDATE SKIP LOCKED), публикует задачу в async-tasks, помечает TASK_PUBLISHED.&lt;br&gt;     Краш после публикации → пере-публикация: дубль в Kafka безопасен, его погасит inbox сервиса.&lt;br&gt;4. &lt;b&gt;Consumer задач&lt;/b&gt; (стейтless, дедуп НЕ здесь): читает async-tasks, вызывает REST бизнес-сервисов c X-Message-Id.&lt;br&gt;5. &lt;b&gt;Бизнес-сервис&lt;/b&gt; (inbox по message_id): дубль → сохранённый ответ из кэша; новая задача → бизнес-запись + inbox атомарно.&lt;br&gt;6. &lt;b&gt;Consumer задач&lt;/b&gt; публикует ответ/ошибку в async-results.&lt;br&gt;7. &lt;b&gt;Result Consumer&lt;/b&gt; (внутри фасада): читает async-results, UPDATE строки → COMPLETED | FAILED (WHERE TASK_PUBLISHED, повтор → no-op).&lt;br&gt;8. &lt;b&gt;Webhook Sender&lt;/b&gt; (фон, внутри фасада): поллит COMPLETED/FAILED, шлёт HTTPS-вебхук c HMAC и event_id;&lt;br&gt;     успех → NOTIFIED; исчерпание ретраев → webhook_dead_letters (DLQ) + алерт.&lt;br&gt;9. &lt;b&gt;Резервный канал&lt;/b&gt;: банк в любой момент получает статус и результат через GET /async/operations/{request_id}." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;spacing=6;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="265" width="1080" height="330" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t_comp_h" value="&lt;b&gt;Компоненты&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="615" width="1080" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t_comp" value="• &lt;b&gt;API Gateway&lt;/b&gt; — аутентификация банка, rate-limit, резолв tenant_id; единая точка входа для sync- и async-путей.&lt;br&gt;• &lt;b&gt;Асинхронный фасад&lt;/b&gt; — владелец жизненного цикла операции: Operations API (приём + статус), async_operations (БД),&lt;br&gt;    Task Relay, Result Consumer, Webhook Sender, webhook_dead_letters. Всё в одном деплое, скейлится инстансами.&lt;br&gt;• &lt;b&gt;async_operations&lt;/b&gt; — единая таблица-источник истины о статусе: строка = операция = отложенное событие.&lt;br&gt;• &lt;b&gt;Kafka&lt;/b&gt; — транспорт at-least-once: async-tasks (задачи), async-results (ответы), отдельные dlq-топики.&lt;br&gt;• &lt;b&gt;Consumer задач&lt;/b&gt; — мост Kafka → REST; стейтless, рестарт безопасен.&lt;br&gt;• &lt;b&gt;Бизнес-сервисы&lt;/b&gt; (credit-decision, loan-issuance, loan-signing, accounting) — выполняют операцию; идемпотентность&lt;br&gt;    через inbox по message_id в схеме каждого сервиса + UNIQUE бизнес-ключ как последний рубеж.&lt;br&gt;• &lt;b&gt;Replay CLI / Admin UI&lt;/b&gt; — ручной реплей из DLQ с сохранением исходных message_id / event_id (дедуп гасит повтор)." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;spacing=6;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="650" width="1080" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t_states_h" value="&lt;b&gt;Машина состояний операции&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="950" width="1080" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t_states" value="ACCEPTED → TASK_PUBLISHED → COMPLETED | FAILED → NOTIFIED&lt;br&gt;&lt;br&gt;• ACCEPTED — принято, зафиксировано в БД, банк получил 202.&lt;br&gt;• TASK_PUBLISHED — задача опубликована в async-tasks.&lt;br&gt;• COMPLETED / FAILED — бизнес-финал (FAILED = бизнес-отказ: стоп-листы, скоринг; транспортные ошибки статус не меняют — их&lt;br&gt;   отрабатывают ретраи Consumer'а, в пределе DLQ).&lt;br&gt;• NOTIFIED — вебхук доставлен (2xx от банка).&lt;br&gt;Каждый переход идемпотентен: дубль вставки невозможен (PK), повторный UPDATE — 0 строк, повторный вебхук гасится банком по event_id." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;spacing=6;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="985" width="1080" height="220" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t_dlq_h" value="&lt;b&gt;Отказы и DLQ&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="1225" width="1080" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t_dlq" value="• &lt;b&gt;async-tasks.dlq&lt;/b&gt; — задачи после исчерпания ретраев Consumer'а (5xx сервисов) или poison-сообщения.&lt;br&gt;     Важно: одновременно Consumer публикует FAILED в async-results — операция для банка НЕ зависает, DLQ — только разборка.&lt;br&gt;• &lt;b&gt;async-results.dlq&lt;/b&gt; — необрабатываемые результаты (десериализация, неизвестный request_id).&lt;br&gt;• &lt;b&gt;webhook_dead_letters&lt;/b&gt; (таблица, не Kafka) — вебхуки после исчерпания ретраев; эндпоинт банка мёртв — но статус доступен через GET.&lt;br&gt;• &lt;b&gt;Неретраебельные ошибки&lt;/b&gt; (десериализация, бизнес-4xx) — в DLQ сразу, без ретраев.&lt;br&gt;• &lt;b&gt;Мониторинг&lt;/b&gt;: размер DLQ = 0 в норме; глубина ACCEPTED (Task Relay отстаёт); возраст старейшей незавершённой операции." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;spacing=6;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="1260" width="1080" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t_ids_h" value="&lt;b&gt;Сквозные идентификаторы&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="1480" width="1080" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t_ids" value="• &lt;b&gt;request_id&lt;/b&gt; — генерирует банк (Idempotency-Key); ключ дедупа на входе, ключ статуса для GET и вебхука.&lt;br&gt;• &lt;b&gt;message_id&lt;/b&gt; — генерирует фасад (ULID); летит в async-tasks и X-Message-Id; ключ дедупа в inbox сервисов.&lt;br&gt;• &lt;b&gt;event_id&lt;/b&gt; — генерирует фасад (ULID); в payload вебхука; ключ дедупа доставки на стороне банка.&lt;br&gt;• &lt;b&gt;Ключ партиции Kafka&lt;/b&gt;: tenant_id + entity_id — порядок операций в разрезе одного кредита/клиента, параллелизм между тенантами." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;spacing=6;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="1515" width="1080" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t_legend_h" value="&lt;b&gt;Цвета на схеме&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="1665" width="1080" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t_legend" value="• Сиреневый — банк · Жёлтый — gateway / БД операций · Зелёный — асинхронный фасад · Оранжевый — Kafka · Синий — сервисы и consumer&lt;br&gt;• Красные узлы и линии — DLQ и пути отказов · Пунктир — ручной реплей · Жирные линии — основной поток данных" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=13;spacing=6;" parent="d1" vertex="1">
+          <mxGeometry x="60" y="1700" width="1080" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

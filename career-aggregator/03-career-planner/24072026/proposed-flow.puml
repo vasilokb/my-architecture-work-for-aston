@@ -1,0 +1,92 @@
+@startuml proposed_flow
+title Candidate Matching Service — предлагаемая схема работы (после доработки)
+
+skinparam componentStyle rectangle
+skinparam component {
+  BackgroundColor<<ui>>       #E3F2FD
+  BackgroundColor<<api>>      #E8F5E9
+  BackgroundColor<<core>>     #FFF8E1
+  BackgroundColor<<external>> #ECEFF1
+  BorderColor #455A64
+  FontSize 13
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #F9A825
+}
+
+actor "Сотрудник Астона\n(увольняющийся)" as User
+
+package "UI :8501  (Streamlit — переработка ui.py)" <<ui>> {
+  component "Страница резюме\n• список технологий (чекбоксы)\n• выбор своих навыков\n• кнопка «Найти вакансии»" as UiResume
+  component "Страница результатов\n• карточки вакансий\n• % релевантности\n• навыки по каждой позиции\n• сортировка по убыванию" as UiResults
+}
+
+package "API :8000  (FastAPI)" <<api>> {
+  component "app/api/v1/router.py\nPOST /rank/positions\n(адаптация /rank/candidates →\n инверсия направления)" as Router
+
+  component "app/core/services.py\n(замена источника данных)\n• load_vacancy_list()\n• gspread → таблица вакансий" as Services
+
+  component "app/core/ranker.py\nLangChain + gpt-4o\nstructured output\n(адаптация промптов под\n 1 кандидат → много вакансий)" as Ranker
+}
+
+package "Источники данных" <<external>> {
+  component "Лабораторный проект Астона\n• сбор вакансий из HH\n• раз в день\n• ~20 технологий\n• ~1500–2000 вакансий" as LabProject
+
+  database "Таблица вакансий\n(формат Google Sheets)\n• описание вакансии\n• технология\n• ключевые навыки (?)\n• зарплата (?)" as VacancyTable
+
+  component "LLM API\n(OpenAI-совместимый,\nLLM_API_BASE)" as LLM
+}
+
+' --- Online-поток (пользователь) ---
+User          --> UiResume    : выбирает навыки\n(чекбоксы)
+UiResume      --> Router      : POST /rank/positions\n{навыки кандидата}
+Router        --> Services    : загрузка таблицы\nвакансий
+Services      --> VacancyTable : gspread\n(чтение, как сейчас)
+Services      --> Ranker      : таблица вакансий (markdown)\n+ навыки кандидата
+Ranker        --> LLM         : LangChain\nstructured output → Worker[]
+Router        <-- Ranker      : list[Worker]\n(rating 1–100)
+UiResults     <-- Router      : JSON\n(вакансии с rating)
+User          <-- UiResults   : ранжированный список\nс % релевантности
+
+' --- Offline-поток (обновление данных) ---
+LabProject    --> VacancyTable : обновление\nраз в день
+
+note right of VacancyTable
+  ⚠️ Критичный открытый вопрос:
+  можно ли из HH получить
+  структурированные поля
+  (ключевые навыки, зарплата),
+  а не только текстовое описание?
+  
+  Если да — services.py работает
+  почти без изменений (gspread).
+  Если нет — нужен слой извлечения
+  навыков из текста через LLM.
+end note
+
+note right of Ranker
+  Этап 1 (MVP):
+    LLM-сопоставление
+    (переиспользование ranker.py)
+
+  Этап 2 (развитие):
+    векторизация вакансий
+    и кандидатов → векторная БД
+    → мгновенное ранжирование
+end note
+
+note bottom of UiResume
+  Текущий ui.py: 2 вкладки
+  (Подбор кандидата / Подбор интервьюера).
+  Нужно: вкладка/режим «Подбор позиций» —
+  выбор навыков кандидата чекбоксами
+  → ранжированные вакансии.
+  Список вакансий стабилен весь день
+  (обновляется раз в сутки offline),
+  поэтому кнопка «Поиск» не делает
+  запрос к HH, а сопоставляет
+  с предобработанным списком.
+end note
+
+@enduml

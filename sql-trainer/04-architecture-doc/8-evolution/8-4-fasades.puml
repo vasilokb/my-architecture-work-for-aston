@@ -1,0 +1,50 @@
+@startuml
+!include https://raw.githubusercontent.com/vasilokb/plantUML/refs/heads/main/C4.puml
+
+title Фасады интеграций – SQL Trainer
+
+Boundary(company, "Корпоративный контур") {
+
+  Container(spa, "SQL Trainer UI", "React SPA", "")
+
+  Container(nginx, "Nginx / API Gateway", "Nginx", "")
+
+  Boundary(k8s, "Kubernetes Cluster – Backend Services") {
+
+    Container(users_svc, "Users/Auth Service", "Spring Boot", , , ,"Пользователи и роли")
+    Component(auth_facade, "AuthFacade", "Фасад SSO/IdP", , , ,"Проверка токенов, получение ролей")
+
+    Container(courses_svc, "Courses/Tasks Service", "Spring Boot", , , ,"Курсы и задачи")
+    Component(ai_facade, "IAIGenerationService", "Фасад ИИ", , , ,"Генерация задач/решений")
+    Component(lms_facade, "LmsIntegration", "Фасад LMS", , , ,"Синхронизация с LMS")
+
+    Container(progress_svc, "Progress/Reporting Service", "Spring Boot", , , ,"Прогресс и отчётность")
+    Component(bi_facade, "BiExportFacade", "Фасад BI/DWH", , , ,"Выгрузка результатов")
+  }
+}
+
+System_Ext(keycloak, "SSO / Keycloak", "")
+System_Ext(ai, "AI Provider", "Внешний ИИ-сервис")
+System_Ext(lms, "LMS / портал обучения", "")
+System_Ext(bi, "BI / DWH", "Хранилище отчётности")
+
+Rel(spa, nginx, "REST API", "HTTPS")
+Rel(nginx, users_svc, "API", "HTTP")
+Rel(nginx, courses_svc, "API", "HTTP")
+Rel(nginx, progress_svc, "API", "HTTP")
+
+' Внутри backend – только через фасады
+Rel(users_svc, auth_facade, "использует")
+Rel(auth_facade, keycloak, "OIDC/OAuth2", "HTTPS")
+
+Rel(courses_svc, ai_facade, "запросы генерации")
+Rel(ai_facade, ai, "AI API", "HTTPS")
+
+Rel(courses_svc, lms_facade, "передача структуры курсов/ссылок")
+Rel(progress_svc, lms_facade, "передача результатов")
+Rel(lms_facade, lms, "LMS API / файлы / шина", "")
+
+Rel(progress_svc, bi_facade, "экспорт агрегатов")
+Rel(bi_facade, bi, "выгрузка в DWH/BI", "")
+
+@enduml

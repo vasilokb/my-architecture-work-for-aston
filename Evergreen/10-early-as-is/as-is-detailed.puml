@@ -1,0 +1,129 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+' C4 Container diagram for Evergreen backend services (updated)
+' Source: service directories and Feign/WebClient integrations in backend/
+
+Person(client, "External Client", "Web/mobile users or external systems")
+
+System_Boundary(evergreen, "Evergreen Platform") {
+  Container(gateway, "gateway-server", "Spring Boot", "API gateway / edge routing\nLocation: backend/gateway-server")
+  Container(gateway2, "gateway-server-2.0", "Spring Boot", "API gateway (v2)\nLocation: backend/gateway-server-2.0")
+  Container(discovery, "discovery-server", "Spring Boot", "Service discovery\nLocation: backend/discovery-server")
+  Container(auth, "authorization-server", "Spring Boot", "OAuth2 authorization\nLocation: backend/authorization-server")
+  Container(auth2, "authorization-server-2-0", "Spring Boot", "OAuth2 authorization (v2)\nLocation: backend/authorization-server-2-0")
+  Container(auth_py, "authorization-server-py", "Python", "OAuth2 authorization (Python)\nLocation: backend/authorization-server-py")
+
+  Boundary(domain, "Domain Services") {
+    Container(client_svc, "client-server", "Spring Boot", "Client profile/CRM\nLocation: backend/client-server")
+    Container(client_py, "client-server-py", "Python", "Client profile/CRM (Python)\nLocation: backend/client-server-py")
+    Container(employee_svc, "employee-service", "Spring Boot", "Employee management\nLocation: backend/employee-service")
+    Container(loan_req, "loanrequest-server", "Spring Boot", "Loan request intake\nLocation: backend/loanrequest-server")
+    Container(loan_req2, "loan-request-server-2-0", "Spring Boot", "Loan request intake (v2)\nLocation: backend/loan-request-server-2-0")
+    Container(loan_req_py, "loan-request-server-py", "Python", "Loan request intake (Python)\nLocation: backend/loan-request-server-py")
+    Container(loan_deal, "loandeal-server", "Spring Boot", "Loan deal processing\nLocation: backend/loandeal-server")
+    Container(scoring, "scoring-server", "Spring Boot", "Scoring engine\nLocation: backend/scoring-server")
+    Container(scoring_py, "scoring-server-py", "Python", "Scoring engine (Python)\nLocation: backend/scoring-server-py")
+    Container(limit_svc, "limit-server", "Spring Boot", "Limit management\nLocation: backend/limit-server")
+    Container(current_acc, "current-account-server", "Spring Boot", "Current account management\nLocation: backend/current-account-server")
+    Container(processing, "processing-server-2-0", "Spring Boot", "Processing (reactive v2)\nLocation: backend/processing-server-2-0")
+    Container(orchestrator, "orchestrator-server", "Spring Boot", "Workflow orchestration (saga)\nLocation: backend/orchestrator-server")
+    Container(payment_orch, "mspaymentorchestrator", "Spring Boot", "Payment orchestration\nLocation: backend/mspaymentorchestrator")
+    Container(docstore, "docstorageservice", "Spring Boot", "Document storage\nLocation: backend/docstorageservice")
+    Container(notifications, "notifications-server", "Spring Boot", "Notifications\nLocation: backend/notifications-server")
+    Container(bki, "bki-server", "Spring Boot", "Credit bureau integration\nLocation: backend/bki-server")
+  }
+
+  Boundary(infra, "Infrastructure") {
+    ContainerDb(postgres, "PostgreSQL", "Database", "Service databases (per-service)\nLocation: infra (not in repo)")
+    ContainerQueue(kafka, "Kafka", "Message broker", "Async events (topics)\nLocation: infra (not in repo)")
+    Container(prometheus, "Prometheus", "Metrics", "Metrics collection\nLocation: infra (not in repo)")
+    Container(grafana, "Grafana", "Dashboards", "Metrics visualization\nLocation: infra (not in repo)")
+  }
+
+  Boundary(external, "External Systems") {
+    Container(cbr, "CBR SOAP API", "External API", "Central Bank rates\nUsed by gateway-server")
+    Container(calendar, "Calendar API", "External API", "Holiday calendar\nUsed by gateway-server")
+    Container(news, "MOEX News API", "External API", "Market news\nUsed by gateway-server")
+  }
+}
+
+Rel(client, gateway, "Uses", "HTTPS")
+Rel(client, gateway2, "Uses", "HTTPS")
+Rel(gateway, discovery, "Service discovery")
+Rel(gateway2, discovery, "Service discovery")
+Rel(gateway, auth, "Auth")
+Rel(gateway2, auth2, "Auth")
+Rel(gateway, client_svc, "Routes")
+Rel(gateway, employee_svc, "Routes")
+Rel(gateway, loan_req, "Routes")
+Rel(gateway, loan_deal, "Routes")
+Rel(gateway, scoring, "Routes")
+Rel(gateway, limit_svc, "Routes")
+Rel(gateway, current_acc, "Routes")
+Rel(gateway, orchestrator, "Routes")
+Rel(gateway, processing, "Routes")
+Rel(gateway, payment_orch, "Routes")
+Rel(gateway, docstore, "Routes")
+Rel(gateway, notifications, "Routes")
+Rel(gateway, bki, "Routes")
+
+' Core credit flow integrations (service-to-service)
+Rel(loan_req, orchestrator, "Starts approval / notifications", "POST /api/v1.0/orchestrator/start-approval\nGET /api/v1.0/orchestrator/channel_notification")
+Rel(loan_req2, orchestrator, "Starts approval / notifications", "POST /api/v1.0/orchestrator/start-approval\nGET /api/v1.0/orchestrator/channel_notification")
+Rel(loan_req, limit_svc, "Fetch limit data", "POST /api/v1.0/limit-service/limit")
+Rel(loan_req2, limit_svc, "Fetch limit data", "POST /api/v1.0/limit-service/limit")
+Rel(orchestrator, loan_req, "Loan request data/status", "*/api/v1.0/loanrequest-service/*")
+Rel(orchestrator, limit_svc, "Limit calculation/data", "*/api/v1.0/limit-service/*")
+Rel(orchestrator, client_svc, "Client notification channels", "POST /api/v1.0/client-service/channel_notification")
+Rel(orchestrator, current_acc, "Current account info", "GET /api/v1.0/currentaccount-service/currentaccount-info/{curAccId}")
+Rel(orchestrator, loan_deal, "Loan deal info", "GET /api/v1.0/loandeal-service/{dealId}")
+Rel(loan_deal, orchestrator, "Client contact details", "POST /api/v1.0/orchestrator/client-contact-details")
+Rel(current_acc, employee_svc, "Employee division", "GET /api/v1.0/employee-service/employees/{employeeId}")
+Rel(current_acc, client_svc, "Client info", "GET /api/v1.0/client-service/clients/{clientId}")
+Rel(current_acc, orchestrator, "Notification channels", "POST /api/v1.0/orchestrator/channel_notification")
+
+' Reactive v2 processing (WebClient-based)
+Rel(processing, limit_svc, "Reactive limit calculations", "WebClient /api/v1.0/limit-service/*")
+Rel(processing, loan_req, "Reactive status updates", "WebClient /api/v1.0/loanrequest-service/*")
+
+' Notifications dependencies
+Rel(notifications, client_svc, "Client data / channels", "GET /api/v1/client\nPOST /api/v1/channel_notification")
+Rel(notifications, orchestrator, "Health check", "GET /api/v1/orchestrator")
+Rel(notifications, auth, "Token validation", "POST /auth/v1.0/validate-token")
+Rel(notifications, loan_deal, "Health check", "GET /api/v1/loan-deal/health-check")
+Rel(notifications, limit_svc, "Health check", "GET /api/v1/limit/health-check")
+
+' Data storage (per-service databases)
+Rel(loan_req, postgres, "Stores requests")
+Rel(loan_req2, postgres, "Stores requests")
+Rel(loan_req_py, postgres, "Stores requests")
+Rel(loan_deal, postgres, "Stores deals")
+Rel(scoring_py, postgres, "Stores scoring data")
+Rel(limit_svc, postgres, "Stores limits")
+Rel(orchestrator, postgres, "Stores workflows")
+Rel(processing, postgres, "Stores processing data")
+Rel(payment_orch, postgres, "Stores payments")
+Rel(docstore, postgres, "Stores documents")
+Rel(notifications, postgres, "Stores notifications")
+Rel(client_py, postgres, "Stores client data")
+
+' Kafka event flow (publish/consume)
+Rel(loan_req, kafka, "Publishes events", "request.status.rejected\nlimit.status.preliminary-approved")
+Rel(loan_req2, kafka, "Publishes events", "request.status.rejected\nlimit.status.preliminary.approved")
+Rel(current_acc, kafka, "Publishes events", "current-account.status.*\npayment.transfer.completed\naccount.delete-accept")
+Rel(loan_deal, kafka, "Publishes events", "deal.status.agreed")
+Rel(limit_svc, kafka, "Publishes events", "limit-status-approved\nrequest.close-data.seven-day")
+Rel(notifications, kafka, "Consumes events", "current-account.status.*\nrequest.status.rejected\nlimit.status.preliminary-approved")
+
+' External integrations via gateway
+Rel(gateway, cbr, "SOAP", "CBR DailyInfo")
+Rel(gateway, calendar, "HTTP", "Calendar API")
+Rel(gateway, news, "HTTP", "MOEX News API")
+
+Rel(limit_svc, prometheus, "Exports metrics")
+Rel(payment_orch, prometheus, "Exports metrics")
+Rel(prometheus, grafana, "Queries metrics")
+
+SHOW_LEGEND()
+@enduml

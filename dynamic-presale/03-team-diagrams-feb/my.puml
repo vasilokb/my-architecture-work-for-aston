@@ -1,0 +1,64 @@
+@startuml
+title Схема 1: Реальная архитектура MVP (docker-compose.yml) - Исправленная
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor "Пользователь" as user
+
+rectangle "Контейнеры" {
+  component "api\n(FastAPI, порт 8080)" as api {
+    component "Custom UI\n(React/HTML/JS)" as custom_ui
+    component "API Layer" as api_layer
+  }
+
+  component "worker\n(python app/worker.py)" as worker
+  component "postgres" as postgres {
+    database "Таблицы:" as tables
+    database "documents" as t1
+    database "files" as t2
+    database "jobs" as t3
+    database "results" as t4
+    database "llm_calls" as t5
+  }
+  component "minio\n(Object Storage)" as minio
+  component "ollama\n(Local LLM)" as ollama
+
+  component "OpenWebUI\n(experimental)" as openwebui
+}
+
+' Основной поток данных
+user --> custom_ui : "http://localhost:8080/ui"
+custom_ui --> api_layer : "REST API\n/api/v1"
+api_layer --> postgres : "CRUD операций"
+worker --> postgres : "Берёт задачи из jobs"
+worker --> minio : "Читает файлы"
+worker --> ollama : "Запросы к LLM\nhttp://ollama:11434"
+
+' Логическая группировка таблиц
+postgres --> tables : "логическая группировка"
+tables --> t1
+tables --> t2
+tables --> t3
+tables --> t4
+tables --> t5
+
+' OpenWebUI - экспериментальный, не в основном потоке
+openwebui ..> ollama : "эксперименты\nс промптами/RAG"
+
+note right of custom_ui
+  Модули UI:
+  - Upload
+  - Run
+  - Status
+  - Table 1 Editor
+  - Table 2 Viewer
+  - Export
+end note
+
+note right of openwebui
+  experimental / RAG only
+  (может отсутствовать в compose)
+end note
+
+@enduml

@@ -1,0 +1,49 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - с учетом справочников HH.ru
+
+LAYOUT_TOP_DOWN()
+
+Person(careerConsultant, "Карьерный консультант", "Создает профили позиций")
+
+System_Boundary(careerAggregator, "Career Aggregator System") {
+
+    Container(webApp, "Web Application", "Streamlit", "Интерфейс с выпадающими списками (города, специализации)")
+
+    Container(apiGateway, "API Gateway", "FastAPI", "Маршрутизация")
+
+    Container(profileService, "Profile Service", "Python/FastAPI", "CRUD профилей, валидация через справочники")
+
+    Container(searchService, "Search Service", "Python/FastAPI", "Формирование URL, запрос к HH.ru, ранжирование")
+
+    Container(dictService, "Dictionary Service", "Python/FastAPI", "Кэширование справочников HH.ru (areas, experience, schedule)")
+
+    ContainerDb(postgres, "PostgreSQL", "PostgreSQL", "Профили, история, снимки вакансий")
+
+    ContainerDb(redis, "Redis", "Redis", "Кэш справочников, результатов поиска")
+}
+
+System_Ext(openrouter, "OpenRouter API", "LLM-шлюз")
+System_Ext(headHunter, "HH.ru API", "Вакансии + справочники")
+
+Rel(careerConsultant, webApp, "Создает профиль", "HTTPS")
+Rel(webApp, apiGateway, "API-запросы", "HTTPS/REST")
+
+Rel(apiGateway, profileService, "Управление профилями", "REST")
+Rel(apiGateway, searchService, "Поиск", "REST")
+Rel(apiGateway, dictService, "Получение справочников для UI", "REST")
+
+Rel(profileService, dictService, "Валидация города/графика", "REST")
+Rel(profileService, postgres, "CRUD", "TCP")
+
+Rel(searchService, dictService, "Маппинг названий в ID", "REST")
+Rel(searchService, openrouter, "LLM", "HTTPS")
+Rel(searchService, headHunter, "GET /vacancies", "HTTPS")
+Rel(searchService, redis, "Кэш", "TCP")
+Rel(searchService, postgres, "Сохранение истории", "TCP")
+
+Rel(dictService, headHunter, "GET /areas, /dictionaries", "HTTPS")
+Rel(dictService, redis, "Кэширование справочников", "TCP")
+
+@enduml

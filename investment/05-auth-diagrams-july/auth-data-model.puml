@@ -1,0 +1,129 @@
+@startuml
+title Модель данных авторизации (auth_db) — ER\nRole → Permission (RBAC), Employee ↔ Credentials, Session, EventCode, AuditLog
+
+skinparam backgroundColor transparent
+skinparam linetype ortho
+hide circle
+skinparam class {
+  BackgroundColor<<entity>> #70AD47
+  BackgroundColor<<auth>>    #5B9BD5
+  BackgroundColor<<otp>>     #F4B400
+  HeaderBackgroundColor<<entity>> #56803A
+  HeaderBackgroundColor<<auth>>    #4A87C4
+  HeaderBackgroundColor<<otp>>     #D89E00
+  AttributeFontSize 11
+  ClassFontSize 13
+}
+
+' ===== Идентичность сотрудника =====
+entity "Employee" as Employee <<entity>> {
+  * employeeId : UUID <<PK>>
+  --
+    username   : varchar   (зашифрован в storage)
+    email      : varchar   (зашифрован)
+    phone      : varchar   (зашифрован)
+    roleId     : UUID <<FK→Role>>
+  --
+    isBlocked  : bool
+    isDeleted  : bool
+    createdAt / updatedAt : timestamp
+    createdBy / updatedBy : varchar
+}
+
+entity "Credentials" as Credentials <<auth>> {
+  * credentialsId : UUID <<PK,= employeeId>>
+  --
+    password       : varchar
+    passwordExpired: timestamp
+    isFirstLogin   : bool        (первичный вход)
+  --
+    failedAttempts : int         (счётчик брутфорса, лимит 3)
+    lockTime       : timestamp   (блокировка до +10м)
+    createdAt / updatedAt : timestamp
+}
+
+' ===== Сессия и токены =====
+entity "Session" as Session <<auth>> {
+  * sessionId    : UUID <<PK>>
+  --
+    refreshToken : text   (JWT / "logout" = отозвана)
+    accessToken  : text   (JWT / "logout")
+    lastUsedAt   : timestamp
+    revokedAt    : timestamp
+    revokeReason : varchar
+}
+
+' ===== RBAC =====
+entity "Role" as Role <<entity>> {
+  * roleId : UUID <<PK>>
+  --
+    name        : varchar   (Admin, Employee,
+                  PrivilegedEmployee, RegulatorOfficer)
+    description : varchar
+    isDeleted   : bool
+    createdAt / updatedAt : timestamp
+}
+
+entity "Permission" as Permission <<entity>> {
+  * permissionId : UUID <<PK>>
+  --
+    roleId      : UUID <<FK→Role>>
+    name        : varchar   (напр. EMPLOYEE_EDIT)
+    description : varchar
+    uri         : varchar   (привязка к endpoint)
+    isDeleted   : bool
+    createdAt / updatedAt : timestamp
+}
+
+' ===== OTP / события подтверждения =====
+entity "EventCode" as EventCode <<otp>> {
+  * eventId    : UUID <<PK>>
+  --
+    employeeId : UUID <<FK→Employee>>
+    codeOtp    : varchar   (6 цифр, зашифрован)
+    otpType    : varchar   (login/reset/change_phone/...)
+    json       : text      (контекст операции)
+  --
+    countRefresh : int     (лимит перевыпуска = 3)
+    timeRefresh  : timestamp  (окно +10м)
+    expiredAt    : timestamp  (срок кода +1м)
+}
+
+' ===== Аудит =====
+entity "AuditLog" as AuditLog <<auth>> {
+  * logId : UUID <<PK>>
+  --
+    employeeId  : UUID
+    eventType   : varchar  (LOGIN/LOGOUT/REFRESH/
+                   CHANGE_PASSWORD/RESET_PASSWORD/...)
+    details     : text
+    createdAt   : timestamp
+}
+
+' ============ СВЯЗИ ============
+Employee "1" }--|| Credentials : "1:1  (credentialsId = employeeId)"
+Employee "1" }--|| Role         : "роль сотрудника"
+Role    "1" }--|{ Permission   : "роль содержит права"
+Employee "1" }--o| Session      : "0..1 активная сессия\n(одно устройство)"
+Employee "1" }--o{ EventCode    : "0..*  ожидающие OTP-события"
+Employee "1" }--d{ AuditLog     : "история действий"
+
+note bottom of Credentials #F4B400
+  <b>Риск:</b> password хранится и сравнивается
+  как plaintext (CredentialsModel.getPassword),
+  в отличие от клиентского BCrypt в customer-service.
+end note
+
+note bottom of Session #F4B400
+  Отзыв токена = значение "logout" в полях.
+  Нет blacklist по jti; одна Session на сотрудника
+  ⇒ вход с нового устройства перезаписывает сессию.
+end note
+
+note bottom of Role
+  4 предустановленные роли (enum RoleType):
+  ADMIN, PRIVILEGED_EMPLOYEE, EMPLOYEE, REGULAR_OFFICER
+  getFullAuthorities() — все роли (используется в verifyAccess).
+end note
+
+@enduml

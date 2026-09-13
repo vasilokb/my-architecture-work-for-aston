@@ -1,0 +1,71 @@
+@startuml
+title Зависимости по коду для фасадов интеграций SQL Trainer
+
+package "backend/libs/common-integration" {
+  interface AuthFacade
+  interface IAIGenerationService
+  interface LmsIntegration
+  interface BiExportFacade
+}
+
+package "backend/users-auth-service" {
+  class AuthController
+  class UserRoleService
+  class KeycloakAuthFacade
+}
+
+package "backend/courses-tasks-service" {
+  class TaskController
+  class TaskAuthoringService
+  class TaskQueryService
+  class ExternalAIGenerationClient
+  class LmsCourseSyncService
+}
+
+package "backend/progress-reporting-service" {
+  class ProgressController
+  class ProgressService
+  class ReportingService
+  class LmsProgressSyncService
+  class BiExportClient
+}
+
+package "внешний мир" {
+  class Keycloak
+  class AI_Provider
+  class LMS
+  class BI_DWH
+}
+
+' ===== AuthFacade / SSO =====
+AuthController ..> AuthFacade : использует
+UserRoleService ..> AuthFacade : использует
+
+KeycloakAuthFacade ..|> AuthFacade : реализует
+KeycloakAuthFacade ..> Keycloak : OIDC/OAuth2
+
+' ===== IAIGenerationService / AI =====
+TaskAuthoringService ..> IAIGenerationService : вызывает\nгенерацию задач/решений
+
+ExternalAIGenerationClient ..|> IAIGenerationService : реализует
+ExternalAIGenerationClient ..> AI_Provider : HTTP API\n(промпты, ответы)
+
+' ===== LmsIntegration / LMS (курсы + прогресс) =====
+TaskQueryService ..> LmsIntegration : (опционально)\nполучить ссылки/статус из LMS
+LmsCourseSyncService ..> LmsIntegration : выгрузка\nструктуры курсов/ссылок в LMS
+
+ProgressService ..> LmsIntegration : передача\nрезультатов по курсам
+LmsProgressSyncService ..> LmsIntegration : плановые\nсинхронизации с LMS
+
+'LmsHttpClient условно
+class LmsHttpClient
+LmsHttpClient ..|> LmsIntegration : реализует
+LmsHttpClient ..> LMS : REST API / файлы / шина
+
+' ===== BiExportFacade / BI / DWH =====
+ReportingService ..> BiExportFacade : экспорт\nагрегатов и отчётов
+
+BiExportClient ..|> BiExportFacade : реализует
+BiExportClient ..> BI_DWH : выгрузка данных\n(файлы / стрим / SQL)
+
+@enduml

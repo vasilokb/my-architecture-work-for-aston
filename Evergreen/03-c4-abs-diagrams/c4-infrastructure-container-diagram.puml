@@ -1,0 +1,156 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - Облачная АБС (SaaS) — целевая архитектура
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 60
+skinparam backgroundColor transparent
+
+' === СИСТЕМА ===
+System_Boundary(абс, "Облачная АБС (SaaS)") {
+
+    ' === 1. СЛОЙ ВХОДА И БЕЗОПАСНОСТИ ===
+    Boundary(security_layer, "Слой входа и безопасности") {
+        Container(ingress, "Ingress Gateway", "Istio", "TLS termination, маршрутизация") #6C3483
+        Container(kong, "API Gateway", "Kong OSS + custom Lua plugin", "JWT validation (JWKS per-kid в Redis), blacklist в Redis, OPA authz, proxying") #6C3483
+        Container(keycloak, "Keycloak", "Keycloak (realm: abs)", "Аутентификация, JWT (Auth Code + PKCE), Keycloak Admin API, service-account admin-service") #6C3483
+        Container(opa, "OPA (PDP)", "Open Policy Agent", "Авторизация по Rego abs.rbac.authz + data.json bundle (in-memory). Fail-closed при недоступности (HA из 2-3 реплик)") #6C3483
+        Container(opa_bundle, "OPA Bundle Server", "Java / Spring Boot", "Сборка data.json из admin_db, push в OPA. Sync trigger от Admin Service + cron-джоб 5 мин") #6C3483
+    }
+
+    ' === 2. СЛОЙ БИЗНЕС-ЛОГИКИ ===
+    Boundary(business_layer, "Слой бизнес-логики") {
+
+        Boundary(core_domain, "Ядро банковской логики") {
+            Container(клиентский_модуль, "Модуль учета клиентов (CIF)", "", "Клиенты, документы") #2874A6
+            Container(счетный_модуль, "Модуль учета счетов", "", "Счета, остатки") #2874A6
+            Container(бухгалтерский_модуль, "Бухгалтерский модуль", "", "Проводки, транзакции") #2874A6
+        }
+
+        Boundary(payment_domain, "Система расчетов") {
+            Container(платежный_модуль, "Модуль расчетов", "", "Платежи, маршрутизация") #2874A6
+        }
+
+        Boundary(tariff_domain, "Тарифный блок") {
+            Container(тарифный_модуль, "Тарифный модуль", "", "Тарифы, комиссии") #2874A6
+            Container(доходы_будущих_периодов, "Модуль учета доходов будущих периодов", "", "Доходы буд. периодов") #2874A6
+        }
+
+        Boundary(card_domain, "Карточный блок") {
+            Container(карточный_модуль, "Модуль пластиковых карт", "", "Карты, эмбоссинг, ПИН") #2874A6
+        }
+
+        Boundary(limit_domain, "Лимитный блок") {
+            Container(лимитный_модуль, "Модуль лимитов", "", "Лимиты, стоп-листы") #2874A6
+        }
+
+        Boundary(credit_domain, "Кредитный блок") {
+            Container(кредитный_модуль, "Кредитный учет", "", "Кредиты, проценты, штрафы") #2874A6
+        }
+
+        Boundary(deposit_domain, "Депозитный блок") {
+            Container(депозитный_модуль, "Депозитный учет", "", "Депозиты, капитализация") #2874A6
+        }
+    }
+
+    ' === 3. СЛОЙ АДМИНИСТРИРОВАНИЯ ===
+    Boundary(admin_layer, "Слой администрирования") {
+        Container(admin_svc, "Admin Service", "Java / Spring Boot", "IAM CRUD: тенанты, роли, сотрудники, биллинг. Keycloak Admin API (client_credentials) + admin_db + trigger OPA Bundle Server. Bulk через Kafka + DLQ") #A569BD
+    }
+
+    ' === 4. СЛОЙ ИНТЕГРАЦИИ ===
+    Boundary(integration_layer, "Слой интеграции") {
+        Container(интеграционный_модуль, "Интеграционный модуль", "", "Адаптеры внешних систем") #A569BD
+        Container(egress, "Egress Gateway", "Istio", "Контроль исходящего трафика") #6C3483
+    }
+
+    ' === 5. СЛОЙ ДАННЫХ ===
+    Boundary(data_layer, "Слой данных") {
+        ContainerDb(db, "PostgreSQL Cluster", "Shared Schema + RLS по tenant_id", "Бизнес-данные: клиенты, счета, проводки. RLS — последний рубеж защиты") #6C3483
+        ContainerDb(admin_db, "admin_db", "PostgreSQL (отдельная БД)", "role_permissions (роль → allowed_methods), tenant_keycloak_clients (tenant_id → client_uuid). Логически отделена от бизнес-данных") #6C3483
+        ContainerDb(redis, "Redis Cluster", "Redis 7", "Blacklist JWT (TTL 1 час для user, без TTL для tenant — fast-path) + JWKS cache (per-kid, TTL 5 мин, lazy refresh)") #6C3483
+    }
+
+    ' === 6. ВЕРТИКАЛЬНАЯ ШИНА ЛОГИРОВАНИЯ ===
+    Boundary(logging_layer, "Шина логирования (Log Stream)") {
+        ContainerQueue(kafka, "Kafka", "Топики: auth-audit, business-events, integration-events, admin-events", "Очередь событий") #A569BD
+        Container(audit, "Audit Service", "Java / Spring Boot", "Потребляет из Kafka, обогащает контекстом, пишет в хранилище") #A569BD
+        ContainerDb(clickhouse, "ClickHouse / Elasticsearch", "Колоночное хранилище", "Хранилище логов и audit-событий (включая auth-audit)") #6C3483
+    }
+}
+
+' === ВНЕШНИЕ СИСТЕМЫ (СГРУППИРОВАНЫ) ===
+System_Ext(consumers, "Потребители", "ДБО Физ/Юр, АРМ, Кредитный конвейер, Надстройки")
+System_Ext(external_services, "Платежно-расчетные системы", "Процессинг, СБП, Межбанк, ЦБ РФ, Кредитные бюро")
+
+' ======================
+' ОСНОВНЫЕ ПОТОКИ ДАННЫХ
+' ======================
+
+' 1. Входящий трафик
+Rel(consumers, ingress, "HTTPS", "")
+
+' 2. Маршрутизация внутри слоя безопасности
+Rel(ingress, kong, "HTTP", "mTLS")
+Rel(kong, redis, "EXISTS blacklist:user, blacklist:tenant; GET jwks:key:{kid}", "Lua plugin, TTL 5 мин")
+Rel(kong, keycloak, "JWKS fetch (при cache miss)", "Sync HTTP, lazy refresh")
+Rel(kong, opa, "POST /v1/data/abs.rbac.authz/allow", "Sync, timeout 50 мс, fail-closed")
+
+' 3. Маршрутизация к бизнес-логике
+Rel(kong, business_layer, "REST API", "mTLS, +X-User-Id, +X-User-Roles")
+
+' 4. Доступ к данным
+Rel(business_layer, db, "SQL (RLS по tenant_id)", "SET LOCAL app.current_tenant")
+Rel(admin_svc, db, "Регистрация тенантов в БД АБС", "")
+
+' 5. Admin Service ↔ IAM-системы
+Rel(admin_svc, keycloak, "Keycloak Admin API", "client_credentials, service-account admin-service")
+Rel(admin_svc, admin_db, "CRUD role_permissions, tenant_keycloak_clients", "SQL, выделенная БД")
+Rel(admin_svc, opa_bundle, "POST /internal/v1/bundle/trigger", "Sync при изменении ролей")
+Rel(opa_bundle, admin_db, "SELECT role_permissions", "для data.json")
+Rel(opa_bundle, opa, "PUT /v1/policies/bundle", "data.json + Rego")
+
+' 6. Интеграция с внешними платежными системами
+Rel(интеграционный_модуль, egress, "Исходящие запросы", "mTLS")
+Rel(egress, external_services, "ISO8583 / SWIFT / HTTPS / SFTP", "")
+
+' 7. Взаимодействие внутри бизнес-слоя
+Rel(клиентский_модуль, счетный_модуль, "Проверка клиента", "REST API")
+Rel(счетный_модуль, бухгалтерский_модуль, "Создание проводок", "REST API")
+Rel(платежный_модуль, счетный_модуль, "Проверка остатков", "REST API")
+Rel(платежный_модуль, лимитный_модуль, "Проверка лимитов", "REST API")
+Rel(платежный_модуль, тарифный_модуль, "Расчет комиссии", "REST API")
+Rel(тарифный_модуль, доходы_будущих_периодов, "Авансовые платежи", "REST API")
+Rel(карточный_модуль, лимитный_модуль, "Лимиты по картам", "REST API")
+Rel(карточный_модуль, тарифный_модуль, "Комиссии по картам", "REST API")
+Rel(кредитный_модуль, лимитный_модуль, "Кредитные лимиты", "REST API")
+Rel(кредитный_модуль, карточный_модуль, "Кредитные карты", "REST API (двусторонний)")
+
+' 8. Связи с интеграционным слоем
+Rel(платежный_модуль, интеграционный_модуль, "Исходящие платежи", "REST API")
+Rel(карточный_модуль, интеграционный_модуль, "Выгрузка карт", "REST API (двусторонний)")
+Rel(кредитный_модуль, интеграционный_модуль, "Кредитные лимиты", "REST API (двусторонний)")
+Rel(лимитный_модуль, интеграционный_модуль, "Синхронизация лимитов", "REST API (двусторонний)")
+Rel(бухгалтерский_модуль, интеграционный_модуль, "Получение транзакций", "REST API")
+Rel(admin_svc, интеграционный_модуль, "Административные запросы", "REST API")
+
+' ======================
+' ПОТОК ЛОГИРОВАНИЯ (вынесен в шину)
+' ======================
+
+' Все сервисы пишут события в Kafka (одна обобщенная связь вместо паутины)
+Rel(security_layer, kafka, "Логи: аутентификация, авторизация, трафик, auth-audit", "Async")
+Rel(business_layer, kafka, "Логи: бизнес-операции", "Async")
+Rel(integration_layer, kafka, "Логи: интеграции", "Async")
+Rel(admin_layer, kafka, "Логи: администрирование", "Async")
+
+' Kong пишет auth-audit отдельно (high-volume событие с особыми требованиями)
+Rel(kong, kafka, "Топик auth-audit: allow/deny + tenant + user + method + path", "Async, fire-and-forget")
+
+' Audit Service читает из Kafka и пишет в хранилище
+Rel(kafka, audit, "Вычитывает события", "Async")
+Rel(audit, clickhouse, "Запись логов", "Batch insert")
+
+@enduml

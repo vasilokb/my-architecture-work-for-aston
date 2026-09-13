@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: career-aggregator-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api.fixed
+    container_name: career-aggregator-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=INFO
+      - CACHE_ENABLED=true
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-test_key}
+      - CORS_ORIGINS=["http://localhost:8501"]
+    restart: unless-stopped

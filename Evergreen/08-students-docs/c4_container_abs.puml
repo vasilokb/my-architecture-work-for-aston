@@ -1,0 +1,77 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title АБС-платформа — верхнеуровневая архитектура (C4 Container)
+
+' === НАСТРОЙКИ ДЛЯ ЧИТАЕМОСТИ ===
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 200
+skinparam ranksep 150
+skinparam backgroundColor transparent
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(bank, "Банк-клиент\n(пилот — Эвергрин)", "Продуктовый слой банка")
+System_Ext(stop, "Сервис стоп-листов", "Mock Server")
+
+System_Boundary(abs, "АБС-платформа (мультитенантная)") {
+    
+    
+    
+        Container(gw, "API Gateway", "Kong + OPA", "Маршрутизация, проверка\nвалидности токена, лимиты")
+        Container(kc, "Keycloak", "OAuth2 / OIDC", "Выдача и управление\nтокенами доступа")
+    
+    
+    
+    
+        Container(cli, "Client Service", "Java 21", "Управление данными\nбанка и клиентов")
+        Container(prod, "Product Catalog", "Java 21", "Каталог кредитных\nпродуктов")
+        Container(app, "credit-decision", "Java 21", "Обработка заявки,\nкредитное решение")
+        Container(acc, "Сервис счетов", "Java 21", "Открытие счетов,\nоперации")
+        Container(doc, "Сервис документов", "Java 21", "Черновик договора")
+    
+    
+    
+    
+        Container(adm, "Admin Service", "Java 21", "Сотрудники,\nролевая система")
+        Container(async, "Асинхронный фасад", "Java 21, Kafka, PG", "Приём операций, очереди,\nвебхуки")
+        Container(notif, "Notification Service", "Java 21", "Отправка уведомлений\n")
+
+        Container(egw, "Egress Gateway (этап 2)", "Kong / Envoy", "Единая точка исходящих вызовов в банки:\nTLS/mTLS-сертификаты и ключи подписи в одном месте,\nаудит и лимиты исходящего трафика,\nскрытие внутренней топологии платформы.\nНа MVP вебхук уходит напрямую, минуя шлюз")
+    
+}
+
+' === СВЯЗИ  ===
+
+
+
+
+Rel(bank,gw, "1. Все запросы (синхронные и асинхронные)","HTTPS / JSON")
+Rel_Right(gw,kc,"Проверка\nвалидности/подписи\nтокена","HTTPS / JWKS")
+Rel_Left(gw,async, "Передача асинхронных операций", "HTTP")
+
+Rel(gw,app,"2. Заявка","HTTP")
+Rel(app,cli,"2.1 Заявка (данные клиента)","HTTP")
+Rel(app,stop,"2.2 Проверка наличия клиента в стоп-листах", "HTTPS")
+Rel(app, acc, "2.3 Заявка (открытие расчётного счета)\n", "HTTP")
+Rel(app,prod,"2.4 Заявка (условия продукта)","HTTP")
+Rel(gw,doc,"3. Заявка (Генерация договора)","HTTP")
+Rel(app,doc,"4. Заявка (Фиксация подписания договора)", "HTTP")
+
+Rel(gw,cli,"","HTTP")
+Rel(gw,adm,"","HTTP")
+Rel(gw,acc,"5. Заявка (Открытие кредитного счета)","HTTP")
+
+Rel(adm,kc,"Создание аккаунта сотрудника банка","HTTP")
+Rel(cli, kc, "Создание аккаунта банка", "HTTP")
+Rel(cli,notif,"Отправка уведомления о регистрации банка","HTTP")
+
+Rel(gw,prod,"","HTTP")
+
+Rel(async, egw, "Уведомление о завершении\nасинхронной операции","")
+Rel(bank, egw, "Подписанный HTTPS-запрос (вебхук)", "HTTPS")
+
+
+
+SHOW_LEGEND()
+@enduml

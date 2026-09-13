@@ -1,0 +1,71 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+title SQL Trainer — MVP 1.0 (React + Java, REST)
+
+' ======= Person =======
+Person(trainee, "Trainee", "Пользуется тренажёром")
+
+' ======= Frontend =======
+System_Boundary(front, "Front [Software System]") {
+  Container(web, "WEB", "Container: JavaScript, React", "API веб-сервиса для trainee")
+}
+
+' ======= Gateway =======
+Container(gw, "API Gateway", "Container: REST", "Единая точка входа всех запросов от внешних и внутренних пользователей.\n[MVP 1.0]")
+
+' ======= Externals =======
+System_Ext(crm, "CRM Trainee", "Software System", "Передача и приём данных")
+
+' --- Auth externals ---
+System_Ext(kc, "Keycloak", "Software System", "Аутентификация и авторизация (OIDC)")
+System_Ext(ad, "Active Directory", "Software System", "LDAP/LDAPS")
+
+' ======= Services: Users =======
+System_Boundary(usersb, "Сервис Пользователи [Container MVP 1.0]") {
+  Container(users, "Users", "Component: Java", "Управление данными о пользователях и их ролях")
+  ContainerDb(usersdb, "Users DB", "Database: PostgreSQL", "Хранение структурированных данных пользователей")
+}
+
+' ======= Services: Tasks =======
+System_Boundary(tasksb, "Сервис Задачи [Container MVP 1.0]") {
+  Container(tasks_stmt, "Tasks — Формулировки заданий", "Component: Java", "Управление заданиями для обучения")
+  Container(tasks_ans,  "Tasks — Формулировки ответов", "Component: Java", "Управление эталонными ответами")
+  Container(tasks_erd,  "Tasks — Схемы ERD", "Component: Java", "Управление схемами для обучения")
+  ContainerDb(tasksdb,  "Tasks DB", "Database: PostgreSQL", "Хранение данных по задачам (задания)")
+}
+
+' ======= Services: Progress =======
+System_Boundary(progb, "Сервис Прогресс [Container MVP 1.0]") {
+  Container(progress, "Progress", "Component: Java", "Управление данными о прогрессе")
+  ContainerDb(progressdb, "Progress DB", "Database: PostgreSQL",    "Хранение данных о прогрессе выполненных заданий пользователей")
+}
+
+' ======= Relations (как на референсе) =======
+Rel(trainee, web, "Пользуется")
+Rel(web, gw, "Отправляет и принимает запросы\nHTTP (REST)")
+
+Rel_L(gw, crm, "Передача и приём данных")
+
+
+' REST от Gateway к сервисам
+Rel(gw, users, "Запросы [JSON/HTTP (REST)]")
+Rel(gw, tasks_stmt, "Запросы [JSON/HTTP (REST)]")
+Rel(gw, tasks_ans,  "Запросы [JSON/HTTP (REST)]")
+Rel(gw, tasks_erd,  "Запросы [JSON/HTTP (REST)]")
+Rel(gw, progress,   "Запросы [JSON/HTTP (REST)]")
+
+' Сервисы к БД
+Rel(users, usersdb, "READ/WRITE", "JDBC")
+Rel(tasks_stmt, tasksdb, "READ/WRITE", "JDBC")
+Rel(tasks_ans,  tasksdb, "READ/WRITE", "JDBC")
+Rel(tasks_erd,  tasksdb, "READ/WRITE", "JDBC")
+Rel(progress, progressdb, "READ/WRITE", "JDBC")
+
+' ======= Auth relations (минимально и прямо) =======
+Rel_R(web, kc, "Логин / SSO (OIDC)", "HTTPS")
+Rel_R(gw, kc, "Проверка токенов / JWKS", "HTTPS")
+Rel_R(kc, ad, "Федерация пользователей", "LDAPS")
+@enduml

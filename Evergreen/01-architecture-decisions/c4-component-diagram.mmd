@@ -1,0 +1,47 @@
+graph TB
+    B[Банк-клиент]
+
+    subgraph "АБС-платформа"
+        GW[API Gateway]
+
+        subgraph "Сервисы (синхронные REST)"
+            CD[credit-decision<br>POST /api/v1/applications]
+            LI[loan-issuance<br>POST /api/v1/loans/issue]
+            LS[loan-signing<br>POST /sign/initiate<br>POST /sign/confirm]
+            ACC[accounting<br>POST /api/v1/accounting/transactions]
+        end
+
+        subgraph "Асинхронный фасад"
+            ASYNC[POST /api/v1/async/operations<br>возвращает 202 + requestId]
+            WHS[Webhook Sender<br>читает webhook-events<br>отправляет HTTP-запрос в банк<br>ретраи + HMAC-подпись<br>DLQ при неудаче]
+        end
+
+        subgraph "Kafka (топики)"
+            K_TASKS[async-tasks]
+            K_WEBHOOK[webhook-events]
+        end
+
+        subgraph "Consumer (основной)"
+            CON[Consumer<br>читает async-tasks<br>вызывает REST сервисов<br>кладёт результат в webhook-events]
+        end
+
+    end
+
+    B-->|REST| GW
+
+    GW -->|синхронно| CD
+    GW -->|синхронно| LI
+    GW -->|синхронно| LS
+    GW -->|синхронно| ACC
+    GW -->|асинхронно 202| ASYNC
+
+    ASYNC -->|кладёт| K_TASKS
+    CON -->|читает| K_TASKS
+    CON -->|вызывает REST внутренний| CD
+    CON -->|вызывает REST внутренний| LI
+    CON -->|вызывает REST внутренний| LS
+    CON -->|вызывает REST внутренний| ACC
+
+    CON -->|публикует результат| K_WEBHOOK
+    WHS -->|читает| K_WEBHOOK
+    WHS -->|отправляет вебхук| B

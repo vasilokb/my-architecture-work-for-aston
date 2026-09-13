@@ -1,0 +1,65 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - MVP (ML Pipeline + Product Logic)
+
+LAYOUT_TOP_DOWN()
+
+' АКТОРЫ
+Person(careerConsultant, "Карьерный консультант", "Управляет профилями позиций, профилями кандидатов, запускает матчинг")
+Person(admin, "Администратор", "Настраивает расписание, запускает ML-задачи")
+
+' СИСТЕМА
+System_Boundary(careerAggregator, "Career Aggregator System (MVP)") {
+
+    Container(webApp, "Web Application", "Streamlit", "Интерфейс для консультанта и администратора")
+
+    rectangle "ML Pipeline" {
+        Container(extractor, "Competency Extractor", "Python-задача")
+        Container(normalizer, "Competency Normalizer", "Python-задача")
+    }
+
+    rectangle "Product Logic" {
+        Container(profileManager, "Candidate Profile Manager", "Python-сервис", "Создание, редактирование, сохранение профилей кандидатов (компетенции + уровни)")
+        Container(grading, "Vacancy Grading", "Python-сервис (шедулер)")
+        Container(matching, "Candidate Matching", "Python-сервис", "Сопоставляет профиль кандидата с вакансиями → match_score + gap")
+    }
+
+    ContainerDb(db, "PostgreSQL", "SQLite для MVP")
+}
+
+' ВНЕШНИЕ СИСТЕМЫ
+System_Ext(hh, "HH.ru API")
+System_Ext(llm, "OpenRouter API")
+
+' === СВЯЗИ АКТОРОВ ===
+Rel(admin, webApp, "Настраивает расписание, запускает ML", "HTTPS")
+Rel(careerConsultant, webApp, "Управляет профилями позиций, кандидатами, запускает матчинг", "HTTPS")
+
+' === СВЯЗИ WEBAPP С ЗАДАЧАМИ ===
+Rel(webApp, extractor, "Запускает", "REST")
+Rel(webApp, normalizer, "Запускает", "REST")
+Rel(webApp, grading, "Передаёт настройки расписания", "REST")
+Rel(webApp, profileManager, "Создаёт/редактирует профиль кандидата", "REST")
+Rel(webApp, matching, "Запускает матчинг для выбранного кандидата", "REST")
+
+' === СВЯЗИ ЗАДАЧ С ВНЕШНИМИ СИСТЕМАМИ И БД ===
+Rel(extractor, hh, "Загружает вакансии", "HTTPS")
+Rel(extractor, llm, "Извлекает компетенции", "HTTPS")
+Rel(extractor, db, "Сохраняет vacancies, raw_competencies", "SQL")
+
+Rel(normalizer, db, "Читает raw_competencies, пишет справочники", "SQL")
+
+Rel(grading, hh, "Загружает вакансии", "HTTPS")
+Rel(grading, llm, "Извлекает требования", "HTTPS")
+Rel(grading, db, "Пишет parsed_vacancies, parsed_requirements", "SQL")
+
+Rel(profileManager, db, "Читает/пишет профили кандидатов (candidate_profiles, candidate_skills)", "SQL")
+
+Rel(matching, db, "Читает профиль кандидата, вакансии, справочники; пишет результаты матчинга", "SQL")
+Rel(matching, llm, "Опционально уточняет уровень кандидата при загрузке CV", "HTTPS")
+
+' === КОНСУЛЬТАНТ ЧИТАЕТ РЕЗУЛЬТАТЫ ===
+Rel(webApp, db, "Читает результаты матчинга", "SQL")
+
+@enduml

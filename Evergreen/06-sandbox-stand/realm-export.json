@@ -1,0 +1,186 @@
+{
+  "realm": "abs",
+  "enabled": true,
+  "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 30,
+  "roles": {
+    "realm": [
+      {
+        "id": "role-operator",
+        "name": "operator",
+        "description": "Оператор: базовые операции (создание клиентов, открытие счетов)",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "id": "role-manager",
+        "name": "manager",
+        "description": "Менеджер: расширенные операции (одобрение кредитов, изменение лимитов)",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "id": "role-credit-manager",
+        "name": "credit_manager",
+        "description": "Кредитный менеджер: операции по кредитам",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "id": "role-auditor",
+        "name": "auditor",
+        "description": "Аудитор: read-only доступ для расследования инцидентов",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "id": "role-bank-admin",
+        "name": "bank_admin",
+        "description": "Администратор банка: управление ролями и сотрудниками своего банка",
+        "composite": false,
+        "clientRole": false
+      }
+    ]
+  },
+  "groups": [],
+  "users": [
+    {
+      "id": "user-operator",
+      "username": "operator@bank-007.test",
+      "email": "operator@bank-007.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Оператор",
+      "lastName": "Банк-007",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "operator",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["operator"],
+      "clientRoles": {}
+    },
+    {
+      "id": "user-manager",
+      "username": "manager@bank-007.test",
+      "email": "manager@bank-007.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Менеджер",
+      "lastName": "Банк-007",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "manager",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["manager"],
+      "clientRoles": {}
+    },
+    {
+      "id": "user-bank-admin",
+      "username": "bank-admin@bank-007.test",
+      "email": "bank-admin@bank-007.test",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Админ",
+      "lastName": "Банк-007",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["bank_admin"],
+      "clientRoles": {}
+    }
+  ],
+  "clients": [
+    {
+      "id": "client-bank-007",
+      "clientId": "bank-007",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "bank-007-secret-not-for-prod",
+      "redirectUris": [
+        "http://localhost:8000/*",
+        "https://bank-007.ru/*"
+      ],
+      "webOrigins": ["*"],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "publicClient": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    },
+    {
+      "id": "client-admin-service",
+      "clientId": "admin-service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "admin-service-secret-not-for-prod",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "webOrigins": [],
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "attributes": {}
+    }
+  ],
+  "clientScopes": [
+    {
+      "id": "scope-roles",
+      "name": "roles",
+      "description": "OpenID Connect scope for add user roles to the access token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "${rolesClaim:text}"
+      },
+      "protocolMappers": [
+        {
+          "id": "mapper-roles",
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "foo",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "defaultDefaultClientScopes": ["roles"]
+}

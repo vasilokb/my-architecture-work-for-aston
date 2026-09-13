@@ -1,0 +1,150 @@
+erDiagram
+%% ===== Users DB =====
+    USER {
+        bigint id PK
+        string external_id
+        string email
+        string display_name
+        string status
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    ROLE {
+        bigint id PK
+        string code
+        string name
+    }
+
+    USER_ROLE {
+        bigint user_id FK
+        bigint role_id FK
+        timestamp assigned_at
+    }
+
+    USER ||--o{ USER_ROLE : has
+    ROLE ||--o{ USER_ROLE : assigned_to
+
+%% ===== Tasks DB =====
+    TASK {
+        bigint id PK
+        string code
+        string title
+        string difficulty
+        boolean is_active
+        string tags
+        timestamp created_at
+    }
+
+    TASK_VERSION {
+        bigint id PK
+        bigint task_id FK
+        int version_no
+        string status
+        timestamp created_at
+    }
+
+    TASK_STATEMENT {
+        bigint id PK
+        bigint task_version_id FK
+        string locale
+        text markdown
+    }
+
+    TASK_ANSWER {
+        bigint id PK
+        bigint task_version_id FK
+        text reference_sql
+        string comparison_mode
+        json rules_json
+    }
+
+    TASK_ERD {
+        bigint id PK
+        bigint task_version_id FK
+        json schema_json
+        string checksum
+    }
+
+    DATASET_SEED {
+        bigint id PK
+        bigint task_version_id FK
+        string engine
+        text seed_script
+        string seed_hash
+    }
+
+    TASK ||--o{ TASK_VERSION : versions
+    TASK_VERSION ||--o{ TASK_STATEMENT : has
+    TASK_VERSION ||--o{ TASK_ANSWER : has
+    TASK_VERSION ||--o{ TASK_ERD : has
+    TASK_VERSION ||--o{ DATASET_SEED : seeds
+
+%% ===== Exec DB =====
+    SUBMISSION {
+        bigint id PK
+        bigint user_id FK
+        bigint task_id FK
+        bigint task_version_id FK
+        string engine
+        text sql_text
+        int row_count
+        int duration_ms
+        string status
+        timestamp executed_at
+    }
+
+    SUBMISSION_RESULT {
+        bigint id PK
+        bigint submission_id FK
+        string result_hash
+        json sample_rows
+        string error_message
+    }
+
+    CHECK_RESULT {
+        bigint id PK
+        bigint submission_id FK
+        string verdict
+        decimal score
+        json details_json
+        timestamp checked_at
+    }
+
+    USER ||--o{ SUBMISSION : makes
+    TASK ||--o{ SUBMISSION : for
+    TASK_VERSION ||--o{ SUBMISSION : with
+    SUBMISSION ||--o| SUBMISSION_RESULT : produces
+    SUBMISSION ||--o| CHECK_RESULT : evaluated_by
+
+%% ===== Progress DB =====
+    PROGRESS {
+        bigint id PK
+        bigint user_id FK
+        bigint task_id FK
+        decimal best_score
+        int attempts_count
+        timestamp first_solved_at
+        timestamp last_solved_at
+    }
+
+    LEADERBOARD {
+        bigint id PK
+        bigint user_id FK
+        decimal total_score
+        int solved_count
+        timestamp updated_at
+    }
+
+    CRM_SYNC_LOG {
+        bigint id PK
+        bigint user_id FK
+        string sync_status
+        json payload
+        timestamp synced_at
+    }
+
+    USER ||--o{ PROGRESS : tracks
+    TASK ||--o{ PROGRESS : aggregated_for
+    USER ||--o{ LEADERBOARD : ranks
+    USER ||--o{ CRM_SYNC_LOG : synced_as

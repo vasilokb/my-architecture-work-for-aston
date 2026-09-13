@@ -1,0 +1,289 @@
+@startuml C4
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+' =================================
+' НАСТРОЙКИ КОМПОНОВКИ
+' =================================
+left to right direction       
+' Горизонтальное расположение основных блоков
+skinparam linetype ortho      
+' Прямоугольные линии связей
+skinparam nodesep 60          
+' Горизонтальное расстояние между узлами
+skinparam ranksep 60          
+' Вертикальное расстояние между рангами
+
+' =================================
+' БАЗЫ ДАННЫХ И ИНФРАСТРУКТУРА (вынесены ближе к своим потребителям)
+' =================================
+ContainerDb(postgres1, "PostgreSQL 14/15/17", "Database", "Backend Admin DB")
+ContainerDb(postgres2, "PostgreSQL 14/15/17", "Database", "Backend Client DB")
+ContainerDb(redis1, "Redis 7.2", "Cache", "Redis for accounts, assets, orders")
+ContainerDb(redis2, "Redis 7.2", "Cache", "Redis for OTP, notifications")
+System(Node3_redis, "Redis Cluster", "Кластер Redis для кэша")
+System(Node3_kafka, "Kafka 7.0.0/7.9.0", "Message broker", "Kafka для событийного взаимодействия")
+System(Node3_zookeeper, "Zookeeper 6.2.2/7.9.0", "Координатор", "Для Kafka")
+System(Node3_minio, "MinIO", "Object Storage", "Хранение документов и PDF")
+System(Node3_postgres_containers, "PostgreSQL Containers", "Node 3 DB", "Инстансы PostgreSQL на Node 3")
+System(Node2_postgres_containers, "PostgreSQL Containers", "Node 2 DB", "Инстансы PostgreSQL на Node 2")
+System(Node2_keycloak, "Keycloak", "IdP", "Ключевой авторизационный сервер")
+System(Node2_zipkin, "Zipkin", "Трэсинг", "Distributed tracing service")
+System(Node2_prometheus, "Prometheus", "Метрики", "Сбор метрик микросервисов")
+System(Node2_alertmanager, "Alertmanager", "Алерты", "Оповещения по метрикам")
+System(Node2_grafana, "Grafana", "Визуализация", "Дашборды метрик")
+
+' =================================
+' ПОЛЬЗОВАТЕЛИ
+' =================================
+Person(customer, "Клиент (инвестор)", "Конечный пользователь инвестиционного сервиса")
+Person(employee, "Сотрудник", "Администратор, биржевой сотрудник")
+
+' =================================
+' ФРОНТЕНД
+' =================================
+Boundary(frontend, "Frontend Layer") {
+  Container(react_frontend, "React Frontend", "Vite 4.4.9", "SPA клиентского приложения")
+  Container(react_backend, "React Build Env", "Docker (node:20-alpine)", "Сборка фронтенда")
+}
+
+' =================================
+' CLIENT BACKEND (группируем с его БД и Redis)
+' =================================
+Boundary(client_backend, "Client Backend (client/backend/)") {
+  together {
+    Container(account_client, "account-service", "Spring Boot 3.5.0", "Клиентские брокерские счета")
+    Container(customer_client, "customer-service", "Spring Boot 3.5.0", "Клиенты (инвесторы, регистрация, профиль)")
+    Container(catalog_client, "catalog-service", "Spring Boot 3.5.0", "Каталог финансовых инструментов")
+    Container(document_client, "document-service", "Spring Boot 3.5.0", "Клиентские документы, PDF, 2-NDFL")
+    Container(emulator_client, "emulator-service", "Kotlin + Java", "Эмулятор биржи MOEX, ордера, котировки")
+    Container(notification_client, "notification-service", "Spring Boot 3.5.0", "Push/SSE/Email уведомления для клиентов")
+    Container(otp_client, "otp-service", "Spring Boot 3.5.0", "OTP коды для критичных операций")
+  }
+}
+
+' =================================
+' ADMIN BACKEND (группируем с его БД и Redis)
+' =================================
+Boundary(admin_backend, "Admin Backend (backend/)") {
+  together {
+    Container(auth_admin, "auth-service", "Spring Boot 3.5.5", "Аутентификация и авторизация (JWT, кастомный auth)")
+    Container(trading_admin, "trading-service", "Spring Boot 3.5.0", "Обработка ордеров, портфели, комиссии")
+    Container(education_admin, "education-service", "Spring Boot 3.5.0", "Образовательный контент (курсы, уроки)")
+    Container(employee_admin, "employee-service", "Spring Boot 3.5.0", "Данные о сотрудниках")
+    Container(userinfo_admin, "userinfo-service", "Spring Boot 3.5.0", "Информация о пользователях, WebSocket")
+    Container(management_admin, "management-service-pb", "Spring Boot 3.5.0", "Управление, партнёрские кампании")
+    Container(document_admin, "document-service-pb", "Spring Boot 3.5.0", "Документы для партнёрского банка")
+    Container(account_admin, "account-service-test", "Spring Boot 3.5.0", "Тест/альтернативный сервис счетов")
+    Container(tax_admin, "tax-service", "Spring Boot 3.5.0", "Налоговые расчёты (2-NDFL)")
+    Container(support_admin, "support-service", "Spring Boot 3.5.6", "Поддержка клиентов")
+    Container(financial_admin, "financialtransactions-service", "Spring Boot 3.5.0", "Финансовые транзакции")
+    Container(customercare_admin, "customercare-service", "Spring Boot 3.5.0", "Клиентский сервис, дублёр support-service")
+    Container(newsfeed_admin, "newsfeed-service", "Spring Boot 3.5.0", "Лента новостей")
+    Container(feedback_admin, "criticalfeedbackchannel", "Spring Boot 3.5.0", "Канал критических жалоб")
+    Container(test_admin, "test-service", "Spring Boot 3.5.0", "Тестовый сервис")
+    Container(gateway_admin, "api-gateway", "Spring Boot 3.5.0", "API Gateway (SCG WebFlux + Feign + CircuitBreaker + Zipkin + Prometheus)")
+  }
+}
+
+' =================================
+' СБОРКА (JAR, NEXUS, QA)
+' =================================
+Boundary(backend_builders, "Backend Build Env") {
+  Container(backend_builder1, "Gradle Builder 1", "Gradle 9.0.0-jdk17-alpine", "Сборка Java-микросервисов")
+  Container(backend_builder2, "Gradle Builder 2", "Gradle 9.0.0-jdk17-alpine", "Сборка Java-микросервисов")
+}
+Boundary(shared_libs, "Shared Libraries (Nexus)") {
+  Container(nexus_registry, "Nexus Registry", "Maven/Jar Registry", "Хранение общих библиотек: DTO, shared starters")
+}
+Boundary(qa_layer, "QA / AQA Layer") {
+  together {
+    Container(aqa_api, "AQA API tests", "Java 17, JUnit 5, REST Assured", "Тестирование API сервисов")
+    Container(aqa_ui, "AQA UI tests", "Java 17, Selenium WebDriver", "UI тестирование инвестиционного приложения")
+    Container(allure_reports, "Allure Reports", "Test reports", "Отчеты по результатам тестов")
+    Container(wiremock_stubs, "WireMock Stubs", "Сервисы-заглушки", "Mock-сервисы для тестирования")
+  }
+}
+
+' =================================
+' ИНФРАСТРУКТУРА (узлы)
+' =================================
+System_Boundary(infra, "Инфраструктура (Kubernetes Nodes)") {
+  System(node3, "Kubernetes Node 3 (Release)", "Node 3 - Release/Prod env", "172.17.1.26:31531")
+  System(node2, "Kubernetes Node 2 (Dev)", "Node 2 - Dev env")
+  System(node1, "Kubernetes Node 1 (CI/CD)", "Node 1 - CI/CD")
+}
+
+' =================================
+' СВЯЗИ (оставлены без изменений, но теперь с ортогональными линиями)
+' =================================
+Rel(customer, react_frontend, "HTTPS", "Интерфейс клиента")
+Rel(employee, react_frontend, "HTTPS", "Интерфейс сотрудника")
+Rel(react_frontend, gateway_admin, "HTTP/HTTPS", "REST API + SSE")
+
+Rel(gateway_admin, auth_admin, "HTTP/Feign", "Аутентификация, JWT")
+Rel(gateway_admin, trading_admin, "HTTP/Feign", "Трейдинг, ордера")
+Rel(gateway_admin, education_admin, "HTTP/Feign", "Образовательный контент")
+Rel(gateway_admin, employee_admin, "HTTP/Feign", "Данные о сотрудниках")
+Rel(gateway_admin, userinfo_admin, "HTTP/Feign", "Информация о пользователях")
+Rel(gateway_admin, management_admin, "HTTP/Feign", "Управление")
+Rel(gateway_admin, document_admin, "HTTP/Feign", "Документы партнёрского банка")
+Rel(gateway_admin, account_admin, "HTTP/Feign", "Счета (test/альтернатива)")
+Rel(gateway_admin, tax_admin, "HTTP/Feign", "Налоги")
+Rel(gateway_admin, support_admin, "HTTP/Feign", "Поддержка")
+Rel(gateway_admin, financial_admin, "HTTP/Feign", "Финтранзакции")
+Rel(gateway_admin, customercare_admin, "HTTP/Feign", "Клиентский сервис")
+Rel(gateway_admin, newsfeed_admin, "HTTP/Feign", "Новости")
+Rel(gateway_admin, feedback_admin, "HTTP/Feign", "Критические жалобы")
+Rel(gateway_admin, test_admin, "HTTP/Feign", "Тестовый сервис")
+
+Rel(gateway_admin, account_client, "HTTP/Feign", "Клиентские счета")
+Rel(gateway_admin, customer_client, "HTTP/Feign", "Клиенты")
+Rel(gateway_admin, catalog_client, "HTTP/Feign", "Каталог")
+Rel(gateway_admin, document_client, "HTTP/Feign", "Документы")
+Rel(gateway_admin, emulator_client, "HTTP/Feign", "Эмулятор биржи")
+Rel(gateway_admin, notification_client, "HTTP/Feign", "Уведомления")
+Rel(gateway_admin, otp_client, "HTTP/Feign", "OTP")
+
+' Client Backend DBs
+Rel(account_client, postgres2, "Jdbc", "PostgreSQL")
+Rel(customer_client, postgres2, "Jdbc", "PostgreSQL")
+Rel(catalog_client, postgres2, "Jdbc", "PostgreSQL")
+Rel(document_client, postgres2, "Jdbc", "PostgreSQL")
+Rel(emulator_client, postgres2, "Jdbc", "PostgreSQL")
+Rel(notification_client, postgres2, "Jdbc", "PostgreSQL")
+Rel(otp_client, postgres2, "Jdbc", "PostgreSQL")
+
+Rel(account_client, redis2, "Jedis/Redis client", "Redis кэш для счетов")
+Rel(customer_client, redis2, "Jedis/Redis client", "Redis кэш для клиентов")
+Rel(catalog_client, redis2, "Jedis/Redis client", "Redis кэш для активов")
+Rel(notification_client, redis2, "Jedis/Redis client", "Redis для notifications")
+
+' Admin Backend DBs
+Rel(auth_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(trading_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(education_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(employee_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(userinfo_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(management_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(document_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(account_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(tax_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(support_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(financial_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(customercare_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(newsfeed_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(feedback_admin, postgres1, "Jdbc", "PostgreSQL")
+Rel(test_admin, postgres1, "Jdbc", "PostgreSQL")
+
+' Shared libraries via Nexus
+Rel(nexus_registry, account_client, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, otphandler, logger")
+Rel(nexus_registry, customer_client, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, logger")
+Rel(nexus_registry, catalog_client, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, document_client, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, logger")
+Rel(nexus_registry, notification_client, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, logger")
+Rel(nexus_registry, otp_client, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, auth_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, other shared lib")
+Rel(nexus_registry, trading_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, other shared lib")
+Rel(nexus_registry, education_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, employee_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, userinfo_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, management_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, document_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, logger")
+Rel(nexus_registry, account_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler, logger")
+Rel(nexus_registry, tax_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, support_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, financial_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, customercare_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, newsfeed_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, feedback_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+Rel(nexus_registry, test_admin, "Maven", "interservice-interaction-dto-lib, globalexceptionhandler")
+
+' QA → Services
+Rel(aqa_api, auth_admin, "HTTP", "API tests (auth)")
+Rel(aqa_api, account_client, "HTTP", "API tests (accounts)")
+Rel(aqa_api, customer_client, "HTTP", "API tests (customers)")
+Rel(aqa_api, catalog_client, "HTTP", "API tests (catalog)")
+Rel(aqa_api, emulator_client, "HTTP", "API tests (emulator)")
+Rel(aqa_ui, react_frontend, "WebDriver", "UI tests")
+
+' Kafka topics
+Rel(emulator_client, trading_admin, "Канал Kafka: order_request", "Emulator -> Trading")
+Rel(trading_admin, emulator_client, "Канал Kafka: order_result, order_errors", "Trading -> Emulator")
+Rel(trading_admin, notification_client, "Kafka: order_result_notification, new_order", "Трейдинг → уведомления")
+Rel(trading_admin, account_client, "Kafka: accounts_request, accounts_result, trade_history", "Трейдинг ↔ Счета")
+Rel(customer_client, notification_client, "Kafka: user_auth_notification, user_registration", "Клиент → уведомления")
+Rel(catalog_client, notification_client, "Kafka: favourite_price", "Каталог → уведомления")
+Rel(account_client, notification_client, "Kafka: account_changes_notification", "Счета → уведомления")
+Rel(auth_admin, employee_admin, "Kafka: register-account", "Auth → Employee")
+Rel(employee_admin, userinfo_admin, "Kafka: register-result", "Employee → Userinfo")
+Rel(document_client, tax_admin, "HTTP/Feign", "Расчёт налогов (2-NDFL)")
+Rel(feedback_admin, notification_client, "Kafka: feedback_notification", "Критические жалобы → уведомления")
+
+' Build relations
+Rel(react_backend, react_frontend, "Docker build", "Сборка artifacts")
+Rel(backend_builder1, gateway_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, auth_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, trading_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, education_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, employee_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, userinfo_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, management_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, document_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, account_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, tax_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, support_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, financial_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, customercare_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, newsfeed_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, feedback_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, test_admin, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, account_client, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, customer_client, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, catalog_client, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, document_client, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, emulator_client, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, notification_client, "Docker build", "Сборка контейнеров")
+Rel(backend_builder2, otp_client, "Docker build", "Сборка контейнеров")
+
+' Infra relations
+Rel(customer, infra, "HTTPS", "Через балансировщик/ingress")
+Rel(employee, infra, "HTTPS", "Через балансировщик/ingress")
+Rel(Node2_postgres_containers, postgres1, "Использует", "Узлы кластера")
+Rel(Node3_postgres_containers, postgres2, "Использует", "Узлы кластера")
+Rel(Node3_redis, redis1, "Использует", "Кластер Redis")
+Rel(Node3_redis, redis2, "Использует", "Кластер Redis")
+Rel(Node3_kafka, Node3_redis, "Producer/Consumer", "Kafka ↔ Redis")
+Rel(Node3_minio, redis2, "Кэш объектов", "")
+Rel(Node2_zipkin, gateway_admin, "Brave/Micrometer", "Distributed tracing")
+Rel(Node2_prometheus, gateway_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, auth_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, trading_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, education_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, employee_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, userinfo_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, management_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, document_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, account_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, tax_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, support_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, financial_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, customercare_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, newsfeed_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, feedback_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, test_admin, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, account_client, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, customer_client, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, catalog_client, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, document_client, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, emulator_client, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, notification_client, "Metrics", "Сбор метрик")
+Rel(Node2_prometheus, otp_client, "Metrics", "Сбор метрик")
+Rel(Node2_grafana, Node2_prometheus, "Query", "")
+
+legend right
+  <b>Легенда</b>
+  Все связи теперь рисуются прямоугольными линиями (ortho).
+  Группировка выполнена с помощью together и настроек расстояний.
+endlegend
+
+@enduml

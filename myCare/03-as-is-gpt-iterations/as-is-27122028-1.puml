@@ -1,0 +1,288 @@
+@startuml
+!theme plain
+skinparam shadowing false
+skinparam nodesep 80
+skinparam ranksep 100
+
+' Принудительно вертикальная ориентация
+top to bottom direction
+
+title "Бизнес-процессы в dms-insurance (ДМС) с анализом устойчивости"
+caption "Вертикальная схема по основным сценариям\n<color:blue>Синим цветом выделены предположения (не подтверждены кодом)</color>\nВсе реальные элементы и связи проверены трижды и сохранены"
+
+package "1. Оформление заявки на ДМС" as process1 {
+  [InsuranceApplicationController] as appCtrl
+  note right of appCtrl
+    <b>Реальные HTTP endpoints (из кода)</b>
+    • POST   /applications
+    • PUT    /applications/{id}/status
+    • GET    /applications/{id}
+    --
+    <color:green>Уже неблокирующий</color>
+    HTTP-обработка быстрая, входящий поток освобождается сразу
+    --
+    <color:orange>Предел масштабирования:</color>
+    При 100 RPS требуется 30-40 потоков Tomcat
+  end note
+
+  [InsuranceApplicationService] as appService
+  note right of appService
+    <b>Реальные ключевые методы (из InsuranceApplicationServiceImpl)</b>
+    • createInsuranceApplication(request)
+    • updateInsuranceApplicationStatus(id, status)
+    • getInsuranceApplicationById(id)
+    • Публикация событий:
+      - InsuranceApplicationCreatedEvent
+      - InsuranceApplicationStatusChangedEvent
+    --
+    <color:red>Блокирующий</color>
+    Работа с БД через обычные репозитории — синхронные вызовы, поток блокируется на время запроса к БД
+    --
+    <color:red>Отсутствует таймаут/retry</color>
+    Нет защиты от зависания БД или сети
+    --
+    <color:red>Нет Bulkhead</color>
+    Все операции в одном пуле потоков приложения. Медленный запрос к БД может исчерпать пул и привести к отказу всего сервиса (cascading failure)
+    Рекомендация: разделить пул для тяжёлых БД-операций
+    --
+    <color:orange>Проблема масштабирования:</color>
+    При 100 RPS: 200 транзакций/сек (основная + outbox). Дефолтный пул 10 соединений будет исчерпан за 0.2 секунды.
+  end note
+
+  [DmsProgramRepository] as programRepo
+  note right of programRepo
+    Загрузка программы ДМС (продукт)
+    → проверка покрытий, цены, условий
+    --
+    <color:red>Блокирующий доступ к БД</color>
+    Синхронный запрос, поток ждёт ответа
+    --
+    <color:orange>Дублирование домена:</color>
+    DmsProgram существует только для ДМС. Каждый новый вид страхования создаст свою копию.
+    Архитектурная проблема: нет единого product-service.
+  end note
+
+  [ClientRepository] as clientRepo1
+  note right of clientRepo1
+    Проверка/создание клиента (локальная копия)
+    --
+    <color:red>Блокирующий</color>
+    Синхронный доступ к БД
+    --
+    <color:orange>Дублирование данных:</color>
+    Клиенты хранятся локально. При изменении в user-service требуется синхронизация через события.
+    Архитектурная проблема: нет единого источника истины для клиентов.
+  end note
+
+  [InsuranceApplicationRepository] as appRepo
+}
+
+package "2. Создание и управление полисом" as process2 {
+  [PolicyController] as policyCtrl
+  note left of policyCtrl
+    <b>Реальные HTTP endpoints (из кода)</b>
+    • POST   /policies
+    • PUT    /policies/{id}/status
+    • GET    /policies/{id}
+    --
+    <color:green>Уже неблокирующий</color>
+    Быстрый возврат ответа клиенту
+  end note
+
+  [PolicyService] as policyService
+  note left of policyService
+    <b>Реальные ключевые методы (из PolicyServiceImpl)</b>
+    • createPolicy(from application)
+    • updatePolicyStatus(id, newStatus)
+    • getPolicyById(id)
+    • Публикация событий:
+      - PolicyCreatedEvent
+      - PolicyStatusChangedEvent
+    --
+    <color:red>Блокирующий</color>
+    Синхронные операции с БД (чтение заявки + сохранение полиса)
+    --
+    <color:red>Нет таймаутов и retry</color>
+    Если БД недоступна — запрос висит до системного таймаута
+    Рекомендация: добавить retry с экспоненциальной задержкой (3 попытки) для временных сбоев БД
+    --
+    <color:red>Нет Bulkhead</color>
+    Тяжёлая генерация полиса использует тот же пул потоков, что и лёгкие запросы
+    Рекомендация: отдельный ограниченный пул для операций создания полиса
+    --
+    <color:orange>Архитектурный антипаттерн:</color>
+    Policy существует только для ДМС. Невозможно создать комплексный полис ДМС+Жизнь. Требуется единый policy-service.
+  end note
+
+  [PolicyRepository] as policyRepo
+}
+
+package "3. Урегулирование убытков (выплаты)" as process3 {
+  [ClaimApplicationController] as claimCtrl #lightblue
+  note right of claimCtrl
+    <color:blue><b>Предполагаемый контроллер (не в предоставленном коде)</b></color>
+    Возможные endpoints:
+    • POST   /claims
+    • PUT    /claims/{id}/status
+    • GET    /claims/{id}
+    --
+    <color:green>Неблокирующий (по аналогии с другими контроллерами)</color>
+  end note
+
+  [ClaimService] as claimService #lightblue
+  note right of claimService
+    <color:blue><b>Предполагаемый сервис (логика не в коде)</b></color>
+    Возможные методы:
+    • createClaimApplication(request)
+    • updateClaimStatus(id, status)
+    • Валидация по полису и застрахованному лицу
+    --
+    <color:red>Блокирующий (по аналогии)</color>
+    Синхронные операции чтения полиса + сохранения убытка
+    --
+    <color:red>Нет таймаутов/retry</color>
+    Критически важный процесс — особенно чувствителен к сбоям БД
+    Рекомендация: retry с backoff (3 попытки) + circuit breaker
+    --
+    <color:red>Нет Bulkhead</color>
+    Обработка убытков может включать внешние проверки
+    Рекомендация: отдельный пул для длительных операций урегулирования
+    --
+    <color:orange>Архитектурная проблема:</color>
+    ClaimApplication существует только для ДМС. Нет единого case management для всех типов убытков.
+  end note
+
+  [ClaimApplicationRepository] as claimRepo
+  note right of claimRepo
+    <b>Реальная сущность и репозиторий (из кода)</b>
+    Сохранение ClaimApplication:
+    • amount, bankAccountNumber, status
+    • ссылки на Policy и InsuredPerson
+    --
+    <color:red>Блокирующий доступ к БД</color>
+  end note
+
+  [InsuredPerson related] as insured
+}
+
+package "Общие механизмы (применяются ко всем процессам)" as common {
+  [OutboxService] as outboxService
+  note right of outboxService
+    Сохранение событий в Outbox
+    --
+    <color:green>Уже неблокирующий для HTTP</color>
+    Сохранение в той же транзакции — не блокирует ответ клиенту
+    --
+    <color:green>Гарантированная доставка</color>
+    Отличная практика устойчивости
+    --
+    <color:orange>Техническая зрелость:</color>
+    Outbox pattern хорошо реализован. Это основа для эволюции к event-driven архитектуре.
+  end note
+
+  [OutboxCleanupScheduler] as scheduler
+  note right of scheduler
+    Фоновая задача отправки событий в Kafka
+    --
+    <color:green>Уже неблокирующий</color>
+    Работает в отдельном потоке/пуле планировщика
+    --
+    <color:red>Нет retry/backoff для Kafka</color>
+    Если брокер недоступен — события могут застрять
+    Рекомендация: retry с экспоненциальной задержкой (3 попытки)
+    --
+    <color:orange>Проблема масштабирования:</color>
+    Текущая реализация: раз в 30 секунд, LIMIT 1000 событий.
+    При 100 RPS за 30 сек накапливается 3000 событий → 2000 остаются в очереди.
+    Рекомендация: уменьшить интервал до 10 сек, увеличить batch size до 5000.
+  end note
+
+  database "Outbox Table" as outboxRepo
+  note left of outboxRepo
+    <color:orange>Требуется оптимизация для 100+ RPS:</color>
+    • Индексы на (status, created_at) для быстрого поиска PENDING событий
+    • Партицирование по дате при больших объёмах
+    • Batch updates вместо одиночных
+  end note
+
+  queue "Kafka Topics" as kafkaTopics {
+    [dms.client.events]
+    [dms.insurance-application.events]
+    [dms.policy.events]
+  }
+
+  [ClientEventConsumer] as clientConsumer
+  note left of clientConsumer
+    Реальный потребитель событий о клиентах
+    --
+    <color:green>Уже неблокирующий</color>
+    Работает в пуле потребителей Kafka
+    --
+    <color:red>Нет Bulkhead внутри обработчика</color>
+    Если обработка события тяжёлая — может заблокировать весь пул потребителей
+    Рекомендация: ограничить параллелизм обработки
+    --
+    <color:orange>Архитектурный смысл:</color>
+    Синхронизация клиентов между сервисами. При изменении в user-service все остальные сервисы обновляют свои копии.
+  end note
+}
+
+' === Связи (все сохранены и проверены трижды) ===
+appCtrl --> appService
+appService --> clientRepo1
+appService --> programRepo
+appService --> appRepo
+appService --> outboxService
+
+policyCtrl --> policyService
+policyService --> appRepo
+policyService --> policyRepo
+policyService --> outboxService
+
+claimCtrl --> claimService
+claimService --> policyRepo
+claimService --> insured
+claimService --> claimRepo
+claimService .> outboxService : "если события убытков"
+
+outboxService --> outboxRepo
+scheduler --> outboxRepo
+scheduler --> kafkaTopics
+kafkaTopics --> clientConsumer
+
+appService .> policyService : "переход после одобрения"
+policyService .> claimService : "полис нужен для убытка"
+
+note bottom of common
+  <b>Общий вывод по устойчивости:</b>
+  • HTTP и Outbox — уже неблокирующие
+  • Работа с БД — синхронная и блокирующая
+  • Нет защиты от временных сбоев (retry, таймауты)
+  • Нет изоляции ресурсов (bulkhead)
+  --
+  <b>Архитектурные проблемы (иллюзия микросервисности):</b>
+  • Продукты, полисы, убытки, клиенты дублируются для каждого вида страхования
+  • Нет общих доменных сервисов (product, policy, claim, user)
+  • Масштабирование через дублирование, а не через расширение ядра
+  --
+  Рекомендации:
+  • Добавить таймауты и retry (3 попытки с backoff) для всех внешних и БД-операций
+  • Ввести bulkhead: отдельные пулы для БД, тяжёлых расчётов, Kafka
+  • Рассмотреть переход на неблокирующий доступ к БД
+  • Начать выделение общих доменов: product-service (первый кандидат)
+end note
+
+legend right
+  <color:green>Зелёный:</color> Уже неблокирующий / хорошая практика
+  <color:red>Красный:</color> Блокирующий или требует доработки устойчивости
+  <color:orange>Оранжевый:</color> Архитектурные инсайты и проблемы масштабирования
+  <color:blue>Синий:</color> Предположение (не подтверждено предоставленным кодом)
+  --
+  <b>Поток сверху вниз:</b>
+  1. Заявка → 2. Полис → 3. Убыток
+  --
+  <b>Ключевая метрика:</b>
+  При 100 RPS: 200 транзакций/сек, 30-40 потоков Tomcat, пул БД 10 соединений → bottleneck
+endlegend
+
+@enduml

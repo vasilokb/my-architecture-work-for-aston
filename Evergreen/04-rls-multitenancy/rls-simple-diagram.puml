@@ -1,0 +1,114 @@
+@startuml
+title Реализация Row-Level Security (RLS) в облачной АБС
+
+skinparam backgroundColor #EEE
+skinparam componentStyle rectangle
+skinparam linetype ortho
+
+actor "Клиент" as Client
+
+package "Внешний слой" {
+  component "API Gateway" as Gateway
+  component "Keycloak" as Keycloak
+}
+
+package "Бизнес-слой" {
+  component "TenantInterceptor" as Interceptor
+  database "TenantContext" as Context <<ThreadLocal>>
+  component "Service Layer" as Service
+  component "Repository" as Repository
+}
+
+package "Слой данных" {
+  component "Connection Pool" as Pool
+  component "TenantAwareDataSource" as DataSource
+  
+  database "PostgreSQL" as PostgreSQL {
+    package "Схема: tenant_alfa" {
+      database "Таблица clients" as TableAlfa
+      component "RLS Policy" as PolicyAlfa
+    }
+    package "Схема: tenant_beta" {
+      database "Таблица clients" as TableBeta
+      component "RLS Policy" as PolicyBeta
+    }
+  }
+}
+
+' === ПОТОК ДАННЫХ ===
+
+' 1. Аутентификация
+Client -> Gateway : "1. HTTPS + JWT"
+Gateway -> Keycloak : "2. Валидация токена"
+Keycloak --> Gateway : "3. Valid (tenant_id: alfa)"
+
+' 2. Обработка запроса
+Gateway -> Interceptor : "4. REST API\nX-Tenant-ID: alfa"
+Interceptor -> Context : "5. Установка tenant_id"
+Context -> Service : "6. Бизнес-логика"
+Service -> Repository : "7. Запрос данных"
+
+' 3. Доступ к базе данных
+Repository -> Pool : "8. Запрос соединения"
+Pool -> DataSource : "9. Получение connection"
+DataSource -> PostgreSQL : "10. SET app.current_tenant = 'alfa'"
+
+' 4. Применение RLS
+PostgreSQL -> PolicyAlfa : "11. Проверка политики"
+PolicyAlfa -> TableAlfa : "12. SELECT * FROM clients"
+TableAlfa --> PolicyAlfa : "13. Данные (tenant_id = 'alfa')"
+PolicyAlfa --> PostgreSQL : "14. Отфильтрованные данные"
+
+' 5. Возврат результата
+PostgreSQL --> DataSource : "15. Результат SQL"
+DataSource --> Pool : "16. Connection с данными"
+Pool --> Repository : "17. Результат запроса"
+Repository --> Service : "18. Объекты домена"
+Service --> Context : "19. Очистка контекста"
+Context --> Interceptor : "20. Завершение обработки"
+Interceptor --> Gateway : "21. REST API ответ"
+Gateway --> Client : "22. HTTP ответ"
+
+' === ПРИМЕР ИЗОЛЯЦИИ ===
+
+note right of TableBeta
+<b>Пример изоляции:</b>
+Если app.current_tenant = 'alfa',
+то запрос к TableBeta
+вернет 0 записей
+end note
+
+' === КОНФИГУРАЦИЯ ===
+
+note top of PostgreSQL
+<b>PostgreSQL RLS:</b>
+ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation_policy
+ON clients USING (tenant_id = 
+  current_setting('app.current_tenant', true));
+end note
+
+note bottom of Interceptor
+<b>Spring Interceptor:</b>
+@Component
+public class TenantInterceptor {
+  public boolean preHandle(...) {
+    String tenantId = extractFromJWT(request);
+    TenantContext.setCurrentTenant(tenantId);
+    return true;
+  }
+}
+end note
+
+legend right
+<b>Ключевые шаги:</b>
+1. Аутентификация
+2. Извлечение tenant_id
+3. ThreadLocal контекст
+4. Установка в БД
+5. Применение RLS
+6. Возврат данных
+end legend
+
+@enduml

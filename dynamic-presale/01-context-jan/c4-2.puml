@@ -1,0 +1,102 @@
+@startuml
+!include https://raw.githubusercontent.com/vasilokb/plantUML/refs/heads/main/C4.puml
+
+Person(user, "Пользователь", "Загружает файлы, запускает AI-анализ, получает результат, правит таблицы и запускает переоценку")
+
+Boundary(system, "AI Document Analysis Platform") {
+
+  Container(frontend, "Frontend", "React",  "Загрузка файлов (PDF)\nЗапуск AI-анализа (alternative)\nРедактирование Таблицы 1 (User Stories)\nЗапуск переоценки (reestimate)\nОтображение Таблицы 1/2\nЭкспорт в Excel")
+
+  Container(api_gw, "API Gateway", "HTTP API",  "Единая точка входа\nПроверка доступа\nМаршрутизация запросов")
+
+  Container(keycloak, "Keycloak", "Auth", "Аутентификация/авторизация")
+
+  Container(user_svc, "User Service", "Backend Service", "Данные пользователя")
+
+  Container(processing, "Processing Service", "Backend Service",  "Оркестратор процесса\nХранит documentId как идентификатор процесса\nУправляет режимами alternative/reestimate")
+
+  Container(file_svc, "File Service", "Backend Service",  "Выдача presigned URL\nЧтение PDF из MinIO\nИзвлечение текстового слоя (PDF text layer)\nЕсли скан без текста — ошибка в MVP\nСохранение нормализованного текста")
+
+  Container(prompt_svc, "Prompt Service", "Backend Service",  "Хранение параметров запроса\nПостроение промптов под два режима:\n- alternative: из текста PDF (+ опционально базовая Таблица 1)\n- reestimate: из Таблицы 1 после правок\nТребование: LLM возвращает строго JSON по контракту")
+
+  Container(analysis_svc, "Analysis Service", "Backend Service",  "Валидация JSON по схеме\nКонтроль качества формулировок\nПересчет PERT и итогов\nФормирование результата в формате 2 таблиц\nПодготовка данных для экспорта в Excel")
+
+  Container(result_svc, "Result Service", "Backend Service",  "Сохранение итогового результата\nВыдача результата по documentId\nВыгрузка результата в Excel")
+}
+
+System_Ext(minio, "S3 / MinIO", "Object Storage")
+System_Ext(kafka, "Apache Kafka", "Message Broker")
+System_Ext(llm_api, "LLM API", "External API")
+System_Ext(llm, "LLM", "Model")
+
+ContainerDb(db_user, "User DB", "DB")
+ContainerDb(db_file, "File DB", "DB")
+ContainerDb(db_prompt, "Prompt DB", "DB")
+ContainerDb(db_analysis, "Analysis DB", "DB")
+ContainerDb(db_result, "Result DB", "DB")
+
+Rel(user, frontend, "Работа в интерфейсе", "Web")
+
+Rel(frontend, api_gw, "Upload URL / Start alternative / Reestimate / Get Result / Export Excel", "HTTP JSON")
+
+Rel(api_gw, keycloak, "Проверка токена", "HTTP")
+Rel(api_gw, user_svc, "Запрос данных пользователя", "HTTP")
+Rel(user_svc, db_user, "CRUD", "SQL")
+
+Rel(api_gw, processing, "Создание документа + запуск режима", "HTTP")
+
+Rel(processing, file_svc, "Получение presigned URL + извлечение текста PDF", "HTTP")
+Rel(file_svc, minio, "PUT/GET файлы (presigned + чтение)", "S3 API / HTTP PUT")
+Rel(file_svc, db_file, "Метаданные файла + нормализованный текст", "SQL")
+
+Rel(processing, prompt_svc, "Передача нормализованного текста + параметры режима\nили Таблица 1 после правок для переоценки", "HTTP")
+Rel(prompt_svc, db_prompt, "Промпт/параметры/сырой ответ LLM (raw)", "SQL")
+Rel(prompt_svc, llm_api, "Генерация строго JSON по контракту", "HTTP")
+Rel(llm_api, llm, "Вызов модели", "API")
+
+Rel(processing, analysis_svc, "Старт анализа ответа LLM (JSON)", "HTTP")
+Rel(analysis_svc, db_analysis, "Результат в формате 2 таблиц + версии\nошибки валидации/качества", "SQL")
+Rel(analysis_svc, kafka, "Публикация результата для сохранения/экспорта", "Async")
+
+Rel(kafka, result_svc, "Доставка результата", "Async")
+Rel(result_svc, db_result, "Сохранение версии результата + Excel", "SQL")
+
+note bottom of processing
+  Режимы процесса:
+  - alternative: первый прогон (из PDF) формирует Таблицу 1/2
+  - reestimate: пользователь правит Таблицу 1 и запускает переоценку (обновляется Таблица 2 и итоги)
+  Важно:
+  - documentId используется для версионирования результата (v1, v2, v3...).
+end note
+
+note bottom of file_svc
+  MVP-ограничение PDF:
+  - поддерживается извлечение текстового слоя (text layer).
+  - если PDF сканированный и текста нет — возвращаем ошибку
+    "scanned pdf not supported in MVP".
+end note
+
+note bottom of prompt_svc
+  Контракт результата:
+  - LLM обязан вернуть ТОЛЬКО JSON (без текста/markdown).
+  - JSON должен соответствовать схеме "2 таблицы":
+    Таблица 1: User Stories + критерии приёмки + NFR(perf) + сущности/объёмы
+    Таблица 2: роли + обязанности + PERT
+  - Для нестабильных ответов: допускается 1 попытка repair (коррекция JSON).
+end note
+
+note bottom of analysis_svc
+  Аналитика и качество:
+  - Схема-валидация обязательна (иначе UI/экспорт ломаются).
+  - Контроль качества формулировок (без заглушек).
+  - Пересчет expected PERT и округление до 0.5.
+  - SA/BA рассчитывается автоматически как % от суммарной оценки.
+end note
+
+note bottom of result_svc
+  Экспорт:
+  - Excel выгрузка должна отражать ровно то,
+    что отображено в Таблице 1/2 выбранной версии.
+end note
+
+@enduml

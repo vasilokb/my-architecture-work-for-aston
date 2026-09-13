@@ -1,0 +1,143 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Диаграмма компонентов — авторизация инвестора (AS-IS)\nKeycloak = IdP (Password Grant) + customer-service (регистрация/OTP/refresh)
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 22
+skinparam ranksep 16
+skinparam backgroundColor transparent
+skinparam defaultTextAlignment center
+skinparam ArrowColor #666666
+skinparam ComponentFontSize 10
+skinparam ContainerFontSize 11
+skinparam ContainerFontStyle bold
+
+' ЛЕГЕНДА ЦВЕТОВ:
+'   #BDD7EE = IdP / точка входа
+'   #D6E4F0 = Web (контроллеры)
+'   #C6E0B4 = Application (сервисы)
+'   #FFE699 = Domain (стратегии/модели)
+'   #F8CBAD = Infrastructure (jwt/redis/kafka/config)
+'   #F4B400 = legacy / сосуществует
+
+System_Ext(react, "React SPA", "access_token → localStorage\nrefresh_token → HttpOnly-cookie\n⚠ исходники не выкачаны локально")
+System_Ext(keycloak, "Keycloak :30803", "realm test-BE\nclient token_client\nOAuth 2.0, issuer JWT\n\nРЕАЛЬНЫЙ IdP клиентов\n(подтв. AQA AuthService→\nKeyCloakServiceRequests)") #BDD7EE
+
+Container_Boundary(gw_b, "API Gateway") {
+    Component(gw_filter, "JwtFilter", "GlobalFilter", "17 клиентских маршрутов\nвалидация Keycloak-JWT\n→ header customer_id downstream") #BDD7EE
+}
+
+Container_Boundary(svc, "customer-service  (Spring Boot 3.5, STATELESS)") {
+
+    Boundary(web, "Web-слой (REST)") {
+        Component(c_reg, "CustomerController", "REST", "/registration, /auth,\n/refresh-token, /checklogin\n(permitAll)") #D6E4F0
+        Component(c_otp, "OTPController", "REST", "/otp, /otp/verify\n(2FA / подтверждение операций)") #D6E4F0
+        Component(c_sec, "CustomerSecurityController", "REST", "/customers-security\n(флаги 2FA, авторизов.)") #D6E4F0
+    }
+
+    Boundary(app, "Application") {
+        Component(s_auth, "AuthService", "Service", "/auth: BCrypt-логин,\nisApproved, is2faEnabled\n/refresh-token: обмен\nс Keycloak → новые токены") #C6E0B4
+        Component(s_otp, "OTPService", "Service", "generate OTP, rate-limit,\ndispatch по operationType") #C6E0B4
+        Component(s_cust, "CustomerService", "Service", "registration: BCrypt,\nCustomer+Info+Passport") #C6E0B4
+        Component(holder, "AuthResponseHolder", "Holder", "буфер токенов 2FA") #C6E0B4
+    }
+
+    Boundary(dom, "Domain / Стратегии OTP") {
+        Component(str_auth, "AuthOtpCheckStrategy", "Strategy", "type=auth →\nвыпуск/прокол токенов") #FFE699
+        Component(str_reg, "RegOtpCheckStrategy", "Strategy", "type=reg → isApproved=true") #FFE699
+        Component(str_pwd, "ChangePasswordOtpCheckStrategy", "Strategy", "type=change_password") #FFE699
+        Component(str_info, "ChangeInfoOtpCheckStrategy", "Strategy", "type=change_info") #FFE699
+        Component(m_sec, "CustomerSecurityInfo", "Model", "is_email/phone_2fa_enabled") #FFE699
+        Component(m_ver, "Verification", "Model", "OTP, attempts=3, TTL=3м") #FFE699
+    }
+
+    Boundary(infra, "Infrastructure") {
+        Component(jwtprov, "JwtProvider", "Starter\nlibertybankjwtstarter", "⚠ legacy HS256-JWT\n(самоподписанный).\nВытесняется Keycloak-токенами.") #F4B400
+        Component(jwtfilt, "JwtFilter", "OncePerRequestFilter", "читает Bearer,\nкладёт customer_id\nв request-attribute") #F4B400
+        Component(sec_cfg, "SecurityConfiguration", "Config", "STATELESS; 6 permitAll,\nиначе authenticated;\nBCryptPasswordEncoder") #F8CBAD
+        Component(cookie, "RefreshTokenCookieWriter", "Util", "refresh в HttpOnly cookie\n(Secure, SameSite=Strict)") #F8CBAD
+        Component(redis_repo, "RedisRepository", "Repository", "HSET tokens:{customerId}\n(legacy; при Keycloak —\nсостояние в realm)") #F8CBAD
+        Component(kafka_p, "KafkaProducer", "Producer", "→ OTP-коды, auth-события") #F8CBAD
+    }
+
+    Db(pg, "customer_service_db", "PostgreSQL", "Customer, CustomerSecurityInfo,\nVerification, CustomerInfo, Passport") #FFFFFF
+    Db(redis, "Redis (DB 6)", "Redis", "tokens:{customerId}\n(legacy self-JWT),\notp_last_timestamp:{...}") #FFFFFF
+}
+
+System_Ext(notif, "notification-service", "Доставка OTP / Push")
+System_Ext(ds, "downstream сервисы", "account, catalog, document, ...")
+
+' ===================== ОСНОВНОЙ ЛОГИН (Keycloak) =====================
+Rel(react, keycloak, "Password Grant\nPOST /protocol/openid-connect/token", "HTTPS")
+Rel(keycloak, react, "access_token (Keycloak JWT)\n+ refresh_token", "")
+
+' ===================== ЗАЩИЩЁННЫЕ ЗАПРОСЫ =====================
+Rel(react, gw_filter, "REST Bearer {Keycloak access}", "")
+Rel(gw_filter, ds, "прокси + customer_id", "")
+Rel(gw_filter, c_reg, "прокси + customer_id", "")
+Rel(gw_filter, c_otp, "прокси", "")
+Rel(gw_filter, c_sec, "прокси + customer_id", "")
+
+' ===================== REFRESH через customer-service =====================
+Rel(react, c_reg, "POST /refresh-token\nCookie refresh_token", "")
+Rel(s_auth, keycloak, "обмен refresh_token realm test-BE", "")
+
+' ===================== РЕГИСТРАЦИЯ / OTP =====================
+Rel(c_reg, s_cust, "registration")
+Rel(c_reg, s_auth, "auth (legacy) / refresh")
+Rel(c_otp, s_otp, "generate / verify")
+Rel(c_sec, s_cust, "get/update 2FA")
+
+Rel(s_otp, m_ver, "create Verification")
+Rel(s_otp, str_auth, "dispatch(type)")
+Rel(s_otp, str_reg, "dispatch(type)")
+Rel(s_otp, str_pwd, "dispatch(type)")
+Rel(s_otp, str_info, "dispatch(type)")
+Rel(s_otp, kafka_p, "send OTP")
+Rel(s_otp, holder, "write tokens (auth)")
+Rel(str_reg, s_cust, "isApproved=true")
+Rel(s_cust, m_sec, "read/write 2FA flags")
+
+Rel(s_auth, cookie, "write refresh cookie")
+Rel(s_auth, jwtprov, "generate (legacy self-JWT,\nесли не Keycloak-обёртка)")
+
+' ===================== INFRA → STORAGE =====================
+Rel(jwtfilt, jwtprov, "extractCustomerId")
+Rel(redis_repo, redis, "HSET/HGET", "")
+Rel(s_cust, pg, "JPA", "")
+Rel(s_otp, pg, "JPA (Verification)", "")
+
+' ===================== KAFKA =====================
+Rel(kafka_p, notif, "OTP-коды", "Kafka")
+Rel(notif, react, "Push/SMS/Email", "")
+
+note bottom of keycloak #BDD7EE
+  <b>Keycloak — реальный IdP клиентов.</b>
+  realm test-BE, client token_client, OAuth 2.0.
+  JWT issuer = http://172.17.1.26:30803/auth/realms/test-BE,
+  scope содержит profile (AQA RefreshValidator).
+  SPA хранит access_token в localStorage (AQA FE-тесты).
+end note
+
+note bottom of jwtprov #F4B400
+  <b>Сосуществование (миграция):</b>
+  customer-service сохранил собственный HS256-JWT
+  (JwtProvider/BCrypt/Redis, эндпоинт /auth). Это legacy-путь,
+  частично вытеснённый Keycloak. /refresh-token уже возвращает
+  Keycloak-токены (issuer=Keycloak).
+end note
+
+legend right
+  |= Цвет |= Роль |
+  |<back:#BDD7EE>   </back>| IdP / точка входа (Keycloak, Gateway) |
+  |<back:#D6E4F0>   </back>| Web (REST-контроллеры) |
+  |<back:#C6E0B4>   </back>| Application (сервисы) |
+  |<back:#FFE699>   </back>| Domain (стратегии / модели) |
+  |<back:#F8CBAD>   </back>| Infrastructure (config / redis / kafka) |
+  |<back:#F4B400>   </back>| Legacy / сосуществует с Keycloak |
+  |<back:#FFFFFF>   </back>| Хранилище |
+endlegend
+
+@enduml

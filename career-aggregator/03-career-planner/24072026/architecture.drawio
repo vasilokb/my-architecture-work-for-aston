@@ -1,0 +1,93 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/25.0.2 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36" version="25.0.2">
+  <diagram name="CRPR Architecture" id="crpr-arch">
+    <mxGraphModel dx="1461" dy="823" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="CRPR_job_aggregating_service — архитектура" style="text;html=1;align=center;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#333333;" parent="1" vertex="1">
+          <mxGeometry x="20" y="5" width="1120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="offline_bg" value="Офлайн — сбор вакансий (раз в день)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#999999;dashed=1;verticalAlign=top;fontStyle=2;fontSize=12;align=left;spacingLeft=14;spacingTop=8;" parent="1" vertex="1">
+          <mxGeometry x="20" y="40" width="1120" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="hh" value="hh.ru&#xa;HeadHunter API" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="60" y="70" width="160" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="lab" value="Лабораторный проект Астона&#xa;&#xa;Сбор вакансий по технологиям&#xa;(~9 технологий, ~1500-2000 вакансий)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="320" y="67" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="gs" value="Google Sheets&#xa;&#xa;Таблица вакансий" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;boundedLbl=1;backgroundOutline=1;size=15;" parent="1" vertex="1">
+          <mxGeometry x="905" y="60" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e_hh_lab" value="сбор вакансий" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontSize=11;" parent="1" source="hh" target="lab" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lab_gs" value="выгрузка (daily)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontSize=11;" parent="1" source="lab" target="gs" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="online_bg" value="Онлайн — подбор позиций по компетенциям" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f7ff;strokeColor=#999999;dashed=1;verticalAlign=top;fontStyle=2;fontSize=12;align=left;spacingLeft=14;spacingTop=8;" parent="1" vertex="1">
+          <mxGeometry x="20" y="200" width="1120" height="460" as="geometry" />
+        </mxCell>
+        <mxCell id="user" value="Сотрудник&#xa;Астона" style="shape=actor;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" parent="1" vertex="1">
+          <mxGeometry x="75" y="240" width="50" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="ui" value="Streamlit UI  :8501" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;verticalAlign=top;spacingTop=10;" parent="1" vertex="1">
+          <mxGeometry x="40" y="370" width="300" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="ui_left" value="Выбор навыков&#xa;&#xa;Дерево навыков&#xa;с уровнями владения&#xa;Кнопка «Подобрать»" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafbe5;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" parent="1" vertex="1">
+          <mxGeometry x="55" y="420" width="125" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="ui_right" value="Результаты&#xa;&#xa;Карточки вакансий&#xa;сортировка по %&#xa;релевантности" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eafbe5;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" parent="1" vertex="1">
+          <mxGeometry x="195" y="420" width="130" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="backend" value="FastAPI  :8000 — CRPR_job_aggregating_service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;verticalAlign=top;spacingTop=10;" parent="1" vertex="1">
+          <mxGeometry x="430" y="240" width="430" height="370" as="geometry" />
+        </mxCell>
+        <mxCell id="cache" value="In-memory кэш&#xa;&#xa;Кэширует DataFrame из Google Sheets&#xa;TTL: 1 час (данные обновляются раз в день)&#xa;Первый запрос: ~2 сек, последующие: мгновенно" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;align=center;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="455" y="280" width="375" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="services" value="services.py&#xa;&#xa;Чтение вакансий из Google Sheets через gspread&#xa;pandas DataFrame" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b1ddf0;strokeColor=#6c8ebf;fontSize=12;align=left;spacingLeft=14;verticalAlign=top;spacingTop=8;" parent="1" vertex="1">
+          <mxGeometry x="455" y="375" width="380" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ranker" value="ranker.py&#xa;&#xa;LangChain + gpt-4o&#xa;Сопоставление навыков кандидата с навыками вакансий&#xa;Structured output: рейтинг релевантности 1-100" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b1ddf0;strokeColor=#6c8ebf;fontSize=12;align=left;spacingLeft=14;verticalAlign=top;spacingTop=8;" parent="1" vertex="1">
+          <mxGeometry x="455" y="465" width="380" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="openai" value="OpenAI API&#xa;&#xa;gpt-4o&#xa;(structured output)" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" parent="1" vertex="1">
+          <mxGeometry x="930" y="475" width="170" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e_user_ui" value="1. Отмечает навыки" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;fontSize=11;fontStyle=1;" parent="1" source="user" target="ui" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ui_be_req" value="2. POST /rank/positions&#xa;(навыки кандидата)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontSize=11;fontStyle=1;" parent="1" source="ui" target="backend" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ui_be_res" value="6. Ранжированные&#xa;вакансии" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0;exitY=0.8;exitDx=0;exitDy=0;entryX=1;entryY=0.7;entryDx=0;entryDy=0;fontSize=11;fontStyle=1;dashed=1;" parent="1" source="backend" target="ui" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_cache_svc" value="кешированные данные" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontSize=11;fontColor=#d79b00;" parent="1" source="cache" target="services" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_svc_gs" value="3. gspread read&#xa;(при промахе кэша)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.3;entryY=1;entryDx=0;entryDy=0;fontSize=11;fontStyle=1;" parent="1" source="services" target="gs" edge="1">
+          <mxGeometry x="0.2075" y="-54" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="970" y="410" />
+            </Array>
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_ranker_llm" value="4. Промпт +&#xa;Markdown-таблица" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;fontSize=11;fontStyle=1;" parent="1" source="ranker" target="openai" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_llm_ranker" value="5. Structured output&#xa;рейтинг 1-100" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0;exitY=0.85;exitDx=0;exitDy=0;entryX=1;entryY=0.85;entryDx=0;entryDy=0;fontSize=11;fontStyle=1;dashed=1;" parent="1" source="openai" target="ranker" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="infra_note" value="Docker Compose (2 сервиса: api :8000, ui :8501), GitLab CI. Базы данных нет — Google Sheets единственный источник (read-only)" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;fontStyle=2;" parent="1" vertex="1">
+          <mxGeometry x="20" y="675" width="700" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="future_note" value="Этап 2 (план): векторизация навыков + векторная БД для мгновенного ранжирования без LLM-вызова" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;fontStyle=2;" parent="1" vertex="1">
+          <mxGeometry x="20" y="700" width="600" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

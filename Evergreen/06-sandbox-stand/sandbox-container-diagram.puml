@@ -1,0 +1,70 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - ABS Sandbox (как развернуто сейчас)
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' === СИСТЕМА ===
+System_Boundary(sandbox, "ABS Sandbox (docker-compose)") {
+
+    ' === 1. IDENTITY ===
+    Boundary(identity, "Identity") {
+        Container(keycloak, "Keycloak", "Quarkus 24.0\nKeycloak 24.0.5\n:8080", "Identity Provider.\nRealm 'abs' импортируется\nиз keycloak/realm-export.json.\n5 realm-ролей, 3 userа,\n2 clientа (bank-007,\nadmin-service).\nOIDC, PKCE S256, ROPC.")
+    }
+
+    ' === 2. EDGE ===
+    Boundary(edge, "API Gateway") {
+        Container(kong, "Kong", "Kong OSS 3.9.3\nOpenResty + Lua\n:8000 proxy\n:8001 admin", "API Gateway.\nДекларативная\nконфигурация (kong.yml).\nПлагины:\n  - blacklist-guard\n    (наш, 71 строка Lua)\n  - file-log\n    (audit в JSONL)\nJWT-валидация НЕ\nнастроена в сатиде -\nтесты шлют готовые\nX-User-* заголовки.")
+    }
+
+    ' === 3. PDP ===
+    Boundary(decision, "Policy Decision Point") {
+        Container(opa, "OPA", "openpolicyagent/opa:0.59.0\n:8181", "Rego-политика:\nabs/rbac/authz.rego\n(47 строк).\nДанные:\ndata.json (2 тенанта:\nbank-007 active,\nbank-008 blocked).\nBundle-mount\n./opa/policies -> /policies.\nKong НЕ вызывает OPA\nсинхронно в сатиде -\nOPA проверяется через\ntest-input-*.json файлы.")
+    }
+
+    ' === 4. CORE SERVICES ===
+    Boundary(core, "Бизнес-сервисы (Java 21 + Spring Boot 3.3)") {
+        Container(admin, "Admin Service", "Spring Boot 3.3.4\nSpring Data JPA\nSQLite (Xerial JDBC)\n:5001", "IAM CRUD.\nBankController,\nRoleController.\nBankService,\nRoleService,\nOpaPublisherService.\nПри создании банка или\nроли пушит tenant config\nв OPA через\nPUT /v1/data/tenants.")
+        Container(backend, "Backend Service", "Spring Boot 3.3.4\nSpring Data JPA\nSQLite (Xerial JDBC)\n:5002", "Mock АБС.\nAccountController,\nCreditController,\nMeController.\nAuthVerificationInterceptor\n(Spring HandlerInterceptor):\nпроверяет X-User-Id,\nX-Tenant-Id, X-User-Roles.\nRole check на уровне\nконтроллера (defense in\ndepth).\nDataSeeder: 2 account,\n1 credit при старте.")
+    }
+
+    ' === 5. STORAGE ===
+    Boundary(storage, "Хранилища") {
+        ContainerDb(redis, "Redis", "redis:7-alpine\n:6379", "Blacklist store.\nКлючи:\n  blacklist:user:{id}\n    TTL 1h\n  blacklist:tenant:{id}\n    без TTL\nVolume: redis-data")
+        ContainerDb(admin_db, "Admin DB", "SQLite\n/admin.db", "Таблицы:\n  banks (tenant_id,\n   name, status)\n  role_permissions\n   (bank_id, role,\n    method)\nVolume: admin-data")
+        ContainerDb(backend_db, "Backend DB", "SQLite\n/backend.db", "Таблицы:\n  accounts (tenant_id,\n   owner_id,\n   account_number,\n   balance)\n  credits (tenant_id,\n   owner_id, amount,\n   status)\nVolume: backend-data")
+    }
+}
+
+' === ВНЕШНИЕ АКТЁРЫ И СИСТЕМЫ ===
+Person(developer, "Developer / QA", "Тестирует auth-flow\nчерез curl / Postman")
+System_Ext(auditlog, "audit.log на хосте", "Файл\nsandbox/kong/audit/\naudit.log\n(JSON Lines)")
+
+' === ЛОГИН (МИМО KONG) ===
+Rel(developer, keycloak, "login", "HTTPS :8080\nOIDC\n/auth, /token")
+
+' === ОБЫЧНЫЙ ЗАПРОС ===
+Rel(developer, kong, "API requests", "HTTP :8000\n/v1/admin/*\n/api/v1/*\nX-User-Id, X-Tenant-Id,\nX-User-Roles")
+
+' === KONG -> REDIS (BLACKLIST) ===
+Rel(kong, redis, "EXISTS blacklist:*", "TCP :6379\nlua-resty-redis\n(blacklist-guard)")
+
+' === KONG -> UPSTREAMS ===
+Rel(kong, admin, "proxy /v1/admin/*", "HTTP :5001\nstrip_path: true")
+Rel(kong, backend, "proxy /api/v1/*", "HTTP :5002\nstrip_path: false")
+
+' === KONG -> AUDIT ===
+Rel(kong, auditlog, "JSON-строка на каждый запрос", "file-log\nbind mount\n/var/log/kong")
+
+' === ADMIN -> OPA (ПРИ ИЗМЕНЕНИЯХ) ===
+Rel(admin, opa, "PUT /v1/data/tenants", "HTTP :8181\nRestTemplate\nпри createBank / addRole")
+
+' === ADMIN/BACKEND -> SQLITE ===
+Rel(admin, admin_db, "JPA CRUD", "jdbc:sqlite\n/data/admin.db")
+Rel(backend, backend_db, "JPA CRUD", "jdbc:sqlite\n/data/backend.db")
+
+@enduml

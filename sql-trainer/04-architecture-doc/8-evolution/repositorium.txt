@@ -1,0 +1,62 @@
+sql-trainer/
+├─ pom.xml                        # корневой Maven/Gradle (multi-module)
+├─ backend/
+│  ├─ libs/
+│  │  └─ security-keycloak/       # общая либка с AuthFacade + Keycloak
+│  │     ├─ pom.xml
+│  │     └─ src/
+│  │        └─ main/java/com/company/sqltrainer/security/
+│  │           ├─ CurrentUser.java
+│  │           ├─ AuthFacade.java
+│  │           ├─ KeycloakAuthFacade.java
+│  │           └─ SecurityConfig.java
+│  │
+│  ├─ users-auth-service/         # контейнер Users/Auth Service
+│  │  ├─ pom.xml
+│  │  └─ src/
+│  │     └─ main/java/com/company/sqltrainer/usersauth/
+│  │        ├─ controller/
+│  │        │  └─ AuthController.java
+│  │        ├─ service/
+│  │        │  └─ UserRoleService.java
+│  │        ├─ repository/
+│  │        │  └─ UserEntity.java
+│  │        └─ UsersAuthApplication.java
+│  │
+│  ├─ courses-tasks-service/      # контейнер Courses/Tasks Service
+│  │  ├─ pom.xml
+│  │  └─ src/
+│  │     └─ main/java/com/company/sqltrainer/coursestasks/
+│  │        ├─ controller/
+│  │        │  └─ TaskController.java
+│  │        ├─ service/
+│  │        │  └─ TaskService.java
+│  │        ├─ repository/
+│  │        │  └─ TaskEntity.java
+│  │        └─ CoursesTasksApplication.java
+│  │
+│  ├─ progress-reporting-service/ # контейнер Progress/Reporting Service
+│  │  ├─ pom.xml
+│  │  └─ src/
+│  │     └─ main/java/com/company/sqltrainer/progress/
+│  │        ├─ controller/
+│  │        │  └─ ProgressController.java
+│  │        ├─ service/
+│  │        │  └─ ProgressService.java
+│  │        ├─ repository/
+│  │        │  └─ AttemptEntity.java
+│  │        └─ ProgressApplication.java
+│  │
+│  └─ execution-service/          # контейнер Execution Service
+│     ├─ pom.xml
+│     └─ src/
+│        └─ main/java/com/company/sqltrainer/execution/
+│           ├─ controller/
+│           │  └─ ExecutionController.java
+│           ├─ service/
+│           │  └─ ExecutionService.java
+│           └─ ExecutionApplication.java
+└─ frontend/
+   └─ sql-trainer-ui/
+      ├─ package.json
+      └─ src/...

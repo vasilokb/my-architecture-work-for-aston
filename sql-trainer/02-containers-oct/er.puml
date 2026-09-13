@@ -1,0 +1,82 @@
+@startuml
+title SQL Trainer — ER Diagram (MVP)
+
+' ===== Пользователи =====
+class USER {
+  id: bigint
+  external_id: string      ' ID из Keycloak/AD
+  email: string
+  display_name: string
+  role: string             ' trainee / mentor / admin
+  status: string
+  created_at: timestamp
+  updated_at: timestamp
+}
+
+' ===== Учебные БД и схемы =====
+class TRAINING_DB {
+  id: bigint
+  name: string             ' demo_shop / hr / music_catalog
+  engine: string           ' postgres / mysql / sqlite
+  description: string
+  created_at: timestamp
+}
+
+class ERD_SCHEMA {
+  id: bigint
+  training_db_id: bigint   ' -> TRAINING_DB.id
+  version_no: int
+  captured_at: timestamp
+  structure_json: json     ' описание таблиц, PK/FK, типов
+  diagram_url: string      ' ссылка на визуализацию ERD
+}
+
+' ===== Задачи =====
+class TASK {
+  id: bigint
+  training_db_id: bigint   ' -> TRAINING_DB.id
+  code: string
+  title: string
+  difficulty: string
+  is_active: boolean
+  statement_md: text       ' условие задачи
+  reference_sql: text      ' эталонный SQL-ответ
+  erd_schema_id: bigint    ' -> ERD_SCHEMA.id
+  created_at: timestamp
+  updated_at: timestamp
+}
+
+' ===== Попытки выполнения =====
+class SUBMISSION {
+  id: bigint
+  user_id: bigint          ' -> USER.id
+  task_id: bigint          ' -> TASK.id
+  sql_text: text
+  status: string           ' queued / success / failed
+  row_count: int
+  duration_ms: int
+  result_hash: string
+  error_message: string
+  executed_at: timestamp
+}
+
+' ===== Прогресс =====
+class PROGRESS {
+  id: bigint
+  user_id: bigint          ' -> USER.id
+  task_id: bigint          ' -> TASK.id
+  best_score: decimal
+  attempts_count: int
+  first_solved_at: timestamp
+  last_solved_at: timestamp
+}
+
+' ===== Связи =====
+TRAINING_DB "1" -- "many" ERD_SCHEMA : has_snapshots
+TRAINING_DB "1" -- "many" TASK : provides_context
+ERD_SCHEMA "1" -- "many" TASK : referenced_by
+USER "1" -- "many" SUBMISSION : makes
+USER "1" -- "many" PROGRESS : tracks
+TASK "1" -- "many" SUBMISSION : has_attempts
+TASK "1" -- "many" PROGRESS : aggregated_for
+@enduml

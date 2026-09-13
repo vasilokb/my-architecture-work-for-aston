@@ -1,0 +1,108 @@
+@startuml
+title Схема 2: Целевая микросервисная архитектура (утверждённая)
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor "Пользователь" as user
+actor "Администратор" as admin
+
+rectangle "Слой доступа" {
+  component "API Gateway" as gateway
+  component "User Service" as user_svc
+}
+
+rectangle "Бизнес-сервисы" {
+  component "File Service" as file_svc {
+    component "fs_store" as fs_store
+    component "fs_meta" as fs_meta
+  }
+
+  component "Prompt Service" as prompt_svc {
+    component "ps_doc" as ps_doc
+    component "ps_state" as ps_state
+    component "ps_guard" as ps_guard
+    component "ps_flow" as ps_flow
+  }
+
+  component "Queue Service" as queue_svc {
+    component "qs_store" as qs_store
+    component "qs_limit" as qs_limit
+    component "qs_retry" as qs_retry
+    component "qs_dispatch" as qs_dispatch
+  }
+
+  component "Analysis Service" as analysis_svc {
+    component "as_parse" as as_parse
+    component "as_llm" as as_llm
+    component "as_validate" as as_validate
+  }
+
+  component "Result Service" as result_svc {
+    component "rs_store" as rs_store
+    component "rs_export" as rs_export
+  }
+}
+
+rectangle "Слой данных" {
+  database "User DB" as user_db
+  database "File DB" as file_db
+  database "Prompt DB" as prompt_db
+  database "Queue DB" as queue_db
+  database "Analysis DB" as analysis_db
+  database "Result DB" as result_db
+
+  component "Object Storage" as object_store
+}
+
+rectangle "Внешние сервисы" {
+  component "LLM Provider" as llm
+  queue "Kafka" as kafka
+}
+
+' Connections
+user --> gateway
+admin --> gateway
+gateway --> user_svc : "аутентификация"
+
+gateway --> file_svc
+gateway --> prompt_svc
+gateway --> analysis_svc
+gateway --> result_svc
+
+' Internal service connections
+prompt_svc --> queue_svc : "ставит задачи"
+analysis_svc --> queue_svc : "берёт задачи"
+analysis_svc --> llm : "LLM запросы"
+
+' Service to DB connections
+user_svc --> user_db
+file_svc --> file_db
+prompt_svc --> prompt_db
+queue_svc --> queue_db
+analysis_svc --> analysis_db
+result_svc --> result_db
+
+file_svc --> object_store
+
+' Internal component connections (утверждённые)
+fs_store --> fs_meta
+ps_doc --> ps_state
+ps_state --> ps_guard
+ps_guard --> ps_flow
+qs_store --> qs_limit
+qs_limit --> qs_retry
+qs_retry --> qs_dispatch
+as_parse --> as_llm
+as_llm --> as_validate
+rs_store --> rs_export
+
+' Async flows (future)
+prompt_svc --> kafka : "события"
+analysis_svc --> kafka : "события"
+
+note right of kafka
+  Kafka — target, not in MVP
+end note
+
+@enduml

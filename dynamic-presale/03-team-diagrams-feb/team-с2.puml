@@ -1,0 +1,244 @@
+@startuml
+!define RECTANGLE class
+skinparam componentStyle rectangle
+skinparam backgroundColor #F5F5F5
+skinparam defaultFontSize 14
+title Container Diagram (C4 Level 2) - AI Presale Estimation Platform
+
+' === ЦВЕТОВАЯ СХЕМА ===
+' Frontend (React) — синий
+' Backend сервисы — жёлтый
+' Базы данных — зелёный
+' Внешние системы — серый
+
+' === ЛЕГЕНДА ===
+legend top
+  <color:#1E90FF>█</color> Frontend (React)
+  <color:#FFD700>█</color> Backend Service
+  <color:#32CD32>█</color> Database
+  <color:#A9A9A9>█</color> External System
+  ---
+  <b>Line Styles:</b>
+  --→ HTTP Synchronous
+  ..→ Queue/Async
+  -[dashed]-> Target/Future
+end legend
+
+' === КОНТЕЙНЕРЫ ===
+
+package "Application Layer" {
+  component "Frontend (React)" as frontend #1E90FF {
+    [UI Application]
+    note right of frontend
+      <b>Port: 3000</b>
+      React SPA
+      - Presale management
+      - File upload (drag & drop)
+      - Analysis dashboard
+      - Result tables
+      - Export controls
+    end note
+  }
+}
+
+package "Backend Services" {
+  component "API Gateway" as api_gw #FFD700 {
+    [Gateway]
+    note right of api_gw
+      <b>Port: 8080</b>
+      - Request routing
+      - Authentication
+      - Rate limiting
+      - API versioning
+    end note
+  }
+
+  component "User Service" as user_svc #FFD700 {
+    [User Management]
+    note right of user_svc
+      <b>Port: 8081</b>
+      - User profiles
+      - Permissions
+      - Role management
+      - Settings
+    end note
+  }
+
+  component "Processing Service" as processing #FFD700 {
+    [Orchestration]
+    note right of processing
+      <b>Port: 8082</b>
+      - Document registry
+      - State management
+      - Workflow orchestration
+      - Guardrails
+    end note
+  }
+
+  component "Queue Service" as queue #FFD700 {
+    [Job Management]
+    note right of queue
+      <b>Port: 8083</b>
+      - Job queue storage
+      - Concurrency control
+      - Retry policies
+      - Job dispatching
+    end note
+  }
+
+  component "File Service" as file #FFD700 {
+    [File Handling]
+    note right of file
+      <b>Port: 8084</b>
+      - File upload/download
+      - Text extraction
+      - OCR processing
+      - Metadata management
+    end note
+  }
+
+  component "AI Service" as ai_service #FFD700 {
+    [AI Processing]
+    note right of ai_service
+      <b>Port: 8085</b>
+      - Prompt management
+      - LLM integration
+      - Response validation
+      - PERT calculations
+    end note
+  }
+
+  component "Analysis Service" as analysis #FFD700 {
+    [Analysis Engine]
+    note right of analysis
+      <b>Port: 8086</b>
+      - Schema validation
+      - Quality assessment
+      - Estimation engine
+      - Result composition
+    end note
+  }
+
+  component "Result Service" as result #FFD700 {
+    [Result Management]
+    note right of result
+      <b>Port: 8087</b>
+      - Result storage
+      - Excel/PDF export
+      - Version management
+      - Access control
+    end note
+  }
+}
+
+package "Data Layer" {
+  database "PostgreSQL\n(Logical Databases)" as postgres #32CD32 {
+    [PostgreSQL Cluster]
+    note right of postgres
+      <b>Port: 5432</b>
+      Logical separation:
+      - db_user (user_svc)
+      - db_process (processing)
+      - db_queue (queue)
+      - db_files (file)
+      - db_ai (ai_service)
+      - db_result (result)
+    end note
+  }
+
+  database "MinIO\n(Object Storage)" as minio #32CD32 {
+    [S3-compatible]
+    note right of minio
+      <b>Port: 9000</b>
+      - Original files
+      - Extracted text
+      - Export files
+    end note
+  }
+}
+
+package "External Dependencies" {
+  component "Keycloak\n(Authentication)" as keycloak #A9A9A9 {
+    [Auth Server]
+    note right of keycloak
+      <b>Port: 8080</b>
+      - OIDC provider
+      - Token validation
+      - User federation
+      - SSO integration
+    end note
+  }
+
+  component "External LLM API" as external_llm #A9A9A9 {
+    [AI Model Service]
+    note right of external_llm
+      <b>External</b>
+      - Cloud LLM APIs
+      - Enterprise AI services
+      - Multiple providers
+    end note
+  }
+
+  component "Kafka\n(Target)" as kafka #A9A9A9 {
+    [Message Broker]
+    note right of kafka
+      <b>Port: 9092</b>
+      <color:red>Future/Target</color>
+      - Event streaming
+      - Async communication
+      - Audit logging
+    end note
+  }
+}
+
+' === СВЯЗИ ===
+
+' 1. FRONTEND -> API GATEWAY
+frontend --[#1E90FF]--> api_gw : "HTTP REST\nAPI calls"
+note on link
+  All user interactions
+  UI → Gateway communication
+end note
+
+' 2. API GATEWAY ROUTING
+api_gw ----> keycloak : "HTTP\nToken validation"
+api_gw ----> user_svc : "HTTP\nUser permissions"
+api_gw ----> processing : "HTTP\nStart analysis"
+api_gw ----> result : "HTTP\nGet results/export"
+
+' 3. PROCESSING SERVICE WORKFLOW
+processing ----> file : "HTTP\nGet file text"
+processing --[#FFD700]--> queue : "HTTP\nEnqueue job"
+processing ----> postgres : "SQL\nProcess state"
+
+' 4. QUEUE SERVICE EXECUTION
+queue ----> ai_service : "HTTP\nAI processing"
+queue ----> analysis : "HTTP\nValidate & analyze"
+queue ----> postgres : "SQL\nQueue state"
+
+' 5. AI SERVICE INTEGRATION
+ai_service ----> external_llm : "HTTP\nLLM API call"
+ai_service ----> postgres : "SQL\nPrompts & results"
+
+' 6. FILE SERVICE OPERATIONS
+file ----> minio : "S3 API\nFile storage"
+file ----> postgres : "SQL\nFile metadata"
+
+' 7. ANALYSIS SERVICE WORKFLOW
+analysis ----> result : "HTTP\nPublish results"
+analysis ----> postgres : "SQL\nAnalysis results"
+
+' 8. RESULT SERVICE OPERATIONS
+result ----> postgres : "SQL\nResult storage"
+result ----> minio : "S3 API\nExport files"
+
+' 9. USER SERVICE DATA
+user_svc ----> postgres : "SQL\nUser data"
+user_svc ----> keycloak : "HTTP\nUser sync"
+
+' 10. FUTURE/TARGET CONNECTIONS
+queue -[dashed]-> kafka : "Job events\n(Target)"
+processing -[dashed]-> kafka : "Process events\n(Target)"
+analysis -[dashed]-> kafka : "Analysis events\n(Target)"
+
+@enduml

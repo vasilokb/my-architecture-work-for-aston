@@ -1,0 +1,38 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Контекстная диаграмма - Career Aggregator System
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' === СИСТЕМА ===
+System(careerAggregator, "Career Aggregator System", "Платформа для автоматизированного подбора вакансий уволенным сотрудникам компании. Обеспечивает семантический матчинг вакансий с профилем пользователя с процентным соответствием")
+
+' === АКТОРЫ ===
+Person(careerConsultant, "Карьерный Консультант", "Администратор системы. Управляет доступом уволенных сотрудников, мониторит активность, администрирует платформу")
+
+Person(employee, "Уволенный Сотрудник", "Конечный пользователь. Ищет релевантные вакансии по своей специальности и навыкам. Доступ ограничен 2 месяцами и 2 запросами в день")
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(headHunter, "HeadHunter API", "Внешний API для получения вакансий. Ограничение: 2000 вакансий за запрос, 50 вакансий за раз для текущего процесса")
+
+System_Ext(otherJobSources, "Другие Источники Вакансий", "LinkedIn, Indeed, Telegram каналы и боты (будущая интеграция)")
+
+System_Ext(ollama, "Ollama / Локальная LLM", "Локальная нейросеть (LLaMA) для семантического анализа запросов и векторизации вакансий. Развёрнута внутри компании")
+
+System_Ext(llmProvider, "LLM Провайдер (Fallback)", "OpenRouter или другие бесплатные модели для fallback при недоступности локальной модели")
+
+' === СВЯЗИ АКТОРОВ С СИСТЕМОЙ ===
+Rel(careerConsultant, careerAggregator, "Администрирует, управляет доступом, мониторит активность", "HTTPS")
+Rel(employee, careerAggregator, "Выбирает специальность и навыки, получает релевантные вакансии с процентным соответствием", "HTTPS")
+
+' === СВЯЗИ СИСТЕМЫ С ВНЕШНИМИ СИСТЕМАМИ ===
+Rel(careerAggregator, headHunter, "Получает вакансии по API", "HTTPS/REST")
+Rel(careerAggregator, otherJobSources, "Планируется интеграция", "HTTPS")
+Rel(careerAggregator, ollama, "Семантический анализ, векторизация, матчинг", "gRPC/REST")
+Rel(careerAggregator, llmProvider, "Fallback при недоступности локальной модели", "HTTPS/REST")
+
+@enduml

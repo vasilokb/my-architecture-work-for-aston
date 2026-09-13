@@ -1,0 +1,113 @@
+﻿@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма (C4 L2) — административная часть (AS-IS)
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 30
+skinparam ranksep 18
+skinparam backgroundColor transparent
+skinparam ContainerFontSize 11
+skinparam BoundaryFontSize 12
+
+' ЛЕГЕНДА ЦВЕТОВ (AS-IS):
+'   #70AD47 = административный сервис (авторизация есть)
+'   #3CB371 = общая точка входа
+'   #F4B400 = проблема архитектуры (долг / дыра / нет авторизации)
+'   серый   = ссылка на клиентскую часть
+
+Person(менеджер, "Менеджер\nкомпании", "Back-office")
+
+System_Ext(keycloak, "Keycloak (IdP)", "JWT клиентов\n(косвенно)")
+
+' === ИНФРАСТРУКТУРА ===
+Boundary(infra, "Инфраструктура") {
+    Container(api_gw, "API Gateway", "Spring Cloud Gateway WebFlux", "PEP по факту.\nAuthJwtFilter (внутр. JWT) только для /auth-service/**, /employee-service/**\nJwtFilter (Keycloak) для ОСТАЛЬНЫХ маршрутов\n⚠ НЕСООТВЕТСТВИЕ: административные маршруты (userinfo, management-pb и др.) идут через КЛИЕНТСКИЙ фильтр") #3CB371
+}
+
+' === ССЫЛКА НА КЛИЕНТСКУЮ ЧАСТЬ ===
+System_Ext(client_part, "Клиентская часть\n(см. c2-client-containers.puml)", "customer, account, trading,\ndocument, catalog —\nисточник данных")
+
+' === административная часть AS-IS ===
+Boundary(admin_part, "административная часть (модули для менеджеров)") {
+
+    Boundary(mod_crm, "Модуль: CRM / Клиенты") {
+        Container(userinfo_svc, "userinfo-service", "Spring Boot 3.5.0", "Back-office по клиентам: просмотр/редактирование,\nистория торгов, счета, экспорт PDF\n\n⚠ ДЫРА: НЕТ @PreAuthorize, идёт через JwtFilter (клиентский).\nЛюбой валидный клиентский токен достигнет административных эндпоинтов.\nСодержит чужую доменную логику (KYC, аудит)") #F4B400
+    }
+
+    Boundary(mod_comm, "Модуль: Коммуникации") {
+        Container(chat_svc, "chat-service (планируется)", "Spring Boot", "Чат клиента с менеджером\n⚠ кандидат на вынос в общий сервис") #F4B400
+    }
+
+    Boundary(mod_support, "Модуль: Поддержка") {
+        Container(support_svc, "support-service", "Spring Boot 3.5.6", "Тикеты, шаблоны\n⚠ создание заявок закомментировано (полумёртв)\nБез method-level security") #70AD47
+    }
+
+    Boundary(mod_hr, "Модуль: HR / Сотрудники") {
+        Container(employee_svc, "employee-service", "Spring Boot 3.5.0", "Сотрудники, рабочие места, задачи, аудит\n⚠ содержит тикеты поддержки (чужой домен)") #70AD47
+    }
+
+    Boundary(mod_security, "Модуль: Безопасность (аутентификация менеджеров)") {
+        Container(auth_svc, "auth-service", "Spring Boot 3.5.5", "Аутентификация менеджеров (JWT, OTP 2FA), роли, права, refresh, logout\n⚠ СВОЙ движок ролей (RolesService/PermissionsService), НЕ через Spring Security @PreAuthorize") #70AD47
+    }
+
+    Boundary(mod_education, "Модуль: Образование") {
+        Container(education_svc, "education-service", "Spring Boot 3.5.0", "Каталог курсов (read-side для клиента)\n@EnableMethodSecurity включён") #70AD47
+        Container(test_svc, "test-service", "Spring Boot 3.5.0", "Квалификационные тесты") #70AD47
+        Container(mgmt_edu, "management-service-pb\n(образование)", "Spring Boot 3.5.0", "CRUD курсов/тем/уроков/категорий\n@PreAuthorize: ADMIN/PRIVILEGED_EMPLOYEE/EMPLOYEE\n⚠ смешан с портфелями — долг") #70AD47
+    }
+
+    Boundary(mod_portfolio, "Модуль: Портфели (админ)") {
+        Container(mgmt_pf, "management-service-pb\n(портфели)", "Spring Boot 3.5.0", "Готовые портфели: CRUD, комиссии, тейк-профит\n@PreAuthorize: TRADING_TP_EDIT\n⚠ смешан с образованием — долг") #70AD47
+    }
+
+    Boundary(mod_finance, "Модуль: Финансовая аналитика") {
+        Container(financial_svc, "financialtransactions-service", "Spring Boot 3.5.0", "История транзакций клиента\n⚠ старый сервис, статус уточняется\nБез method-level security") #F4B400
+        Container(tax_svc, "tax-service", "Spring Boot 3.5.0", "Расчёт НДФЛ (batch), 2-НДФЛ\n⚠ граница клиент/админ не определена") #F4B400
+    }
+
+    Boundary(mod_tariff, "Модуль: Тарифы / Услуги") {
+        Container(customercare_svc, "customercare-service", "Spring Boot 3.5.0", "Подключение платных услуг, договор\n⚠ статус спорный, вызывает клиентские сервисы") #F4B400
+    }
+}
+
+' === СВЯЗИ ===
+Rel(менеджер, api_gw, "HTTPS", "Back-office")
+
+Rel(api_gw, userinfo_svc, "", "REST")
+Rel(api_gw, support_svc, "", "REST")
+Rel(api_gw, employee_svc, "", "REST")
+Rel(api_gw, auth_svc, "", "REST")
+Rel(api_gw, education_svc, "", "REST")
+Rel(api_gw, test_svc, "", "REST")
+Rel(api_gw, mgmt_edu, "", "REST")
+Rel(api_gw, mgmt_pf, "", "REST")
+Rel(api_gw, financial_svc, "", "REST")
+Rel(api_gw, tax_svc, "", "REST")
+Rel(api_gw, customercare_svc, "", "REST")
+
+' === KAFKA: РЕГИСТРАЦИЯ МЕНЕДЖЕРА ===
+Rel(auth_svc, employee_svc, "register-account", "Kafka")
+Rel(employee_svc, userinfo_svc, "register-result", "Kafka")
+
+' === АДМИНКА → КЛИЕНТСКАЯ ЧАСТЬ (агрегация) ===
+Rel(userinfo_svc, client_part, "getCustomerInfo, blockClient", "Feign")
+Rel(userinfo_svc, client_part, "getAccounts, getOrders", "Feign/Kafka")
+Rel(mgmt_pf, client_part, "changePortfolio, getAllPortfolios", "Feign")
+Rel(mgmt_pf, financial_svc, "getTransactionsByCustomerId", "Feign")
+Rel(financial_svc, client_part, "getTransactions", "Feign")
+Rel(tax_svc, client_part, "taxWithdraw", "Feign")
+Rel(customercare_svc, client_part, "getCustomer, getBrokerAccounts, generateDocument", "Feign")
+
+' === ЧАТ ===
+Rel(менеджер, chat_svc, "WebSocket", "Чат с клиентом")
+
+legend right
+  |= Цвет |= Значение |
+  |<back:#70AD47>   </back>| административный сервис |
+  |<back:#3CB371>   </back>| Общая точка входа (Gateway) |
+  |<back:#F4B400>   </back>| Проблема: долг / дыра / нет авторизации |
+endlegend
+
+@enduml

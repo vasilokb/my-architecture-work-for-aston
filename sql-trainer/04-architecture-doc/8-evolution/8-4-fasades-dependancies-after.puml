@@ -1,0 +1,55 @@
+@startuml
+title Общая библиотека security-keycloak для всех backend-сервисов
+
+package "lib: security-keycloak" <<library>> {
+  interface AuthFacade
+  class CurrentUser
+  class KeycloakAuthFacade
+  class SecurityConfig
+}
+
+package "backend/users-auth-service" {
+  class AuthController
+  class UserRoleService
+}
+
+package "backend/courses-tasks-service" {
+  class TaskController
+  class TaskService
+}
+
+package "backend/progress-reporting-service" {
+  class ProgressController
+  class ProgressService
+}
+
+package "backend/execution-service" {
+  class ExecutionController
+  class ExecutionService
+}
+
+package "внешний мир" {
+  class Keycloak
+}
+
+' ===== Зависимости бизнес-кода от фасада =====
+AuthController ..> AuthFacade : getCurrentUser()
+UserRoleService ..> AuthFacade : getCurrentUser()
+
+TaskController ..> AuthFacade : getCurrentUser()
+TaskService ..> AuthFacade : getCurrentUser()
+
+ProgressController ..> AuthFacade : getCurrentUser()
+ProgressService ..> AuthFacade : getCurrentUser()
+
+ExecutionController ..> AuthFacade : getCurrentUser()
+ExecutionService ..> AuthFacade : getCurrentUser()
+
+' ===== Реализация фасада и конфигурация в общей либе =====
+KeycloakAuthFacade ..|> AuthFacade
+AuthFacade ..> CurrentUser : возвращает
+
+SecurityConfig ..> KeycloakAuthFacade : регистрирует бин AuthFacade
+SecurityConfig ..> Keycloak : настраивает JWT / JWK / issuer
+
+@enduml

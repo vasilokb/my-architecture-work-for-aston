@@ -1,0 +1,157 @@
+services:
+  # ========================================
+  # Identity Provider
+  # ========================================
+  keycloak:
+    build:
+      context: ./keycloak
+    container_name: abs-sandbox-keycloak
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_HTTP_PORT:-8080}:8080"
+      - "${KEYCLOAK_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  # ========================================
+  # API Gateway + Custom Lua plugin
+  # ========================================
+  kong:
+    build:
+      context: ./kong
+    container_name: abs-sandbox-kong
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /opt/kong/kong.yml
+      KONG_PLUGINS: bundled,blacklist-guard
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_LOG_LEVEL: info
+    ports:
+      - "${KONG_HTTP_PORT:-8000}:8000"
+      - "${KONG_ADMIN_PORT:-8001}:8001"
+    volumes:
+      - ./kong/kong.yml:/opt/kong/kong.yml:ro
+      - kong-declarative:/opt/kong/declarative
+      - ./kong/audit:/var/log/kong
+    depends_on:
+      opa:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kong health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ========================================
+  # Policy Decision Point
+  # ========================================
+  opa:
+    image: openpolicyagent/opa:0.59.0
+    container_name: abs-sandbox-opa
+    command:
+      - "run"
+      - "--server"
+      - "/policies"
+    ports:
+      - "${OPA_PORT:-8181}:8181"
+    volumes:
+      - ./opa/policies:/policies:ro
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "-d", "/policies/data.json", "1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # ========================================
+  # Blacklist + JWKS cache
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: abs-sandbox-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ========================================
+  # Admin Service (Java 21 + Spring Boot 3.3)
+  # Phase 5: Dockerfile появится в admin-service/Dockerfile
+  # ========================================
+  admin-service:
+    build:
+      context: ./admin-service
+    container_name: abs-sandbox-admin-service
+    environment:
+      SERVER_PORT: 5001
+      SPRING_DATASOURCE_URL: jdbc:sqlite:${ADMIN_DB_PATH:-/data/admin.db}
+      OPA_URL: ${OPA_URL:-http://opa:8181}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "${ADMIN_SERVICE_PORT:-5001}:5001"
+    volumes:
+      - admin-data:/data
+    depends_on:
+      opa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5001/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ========================================
+  # Backend Service (Java 21 + Spring Boot 3.3)
+  # Phase 6: Dockerfile появится в backend-service/Dockerfile
+  # ========================================
+  backend-service:
+    build:
+      context: ./backend-service
+    container_name: abs-sandbox-backend-service
+    environment:
+      SERVER_PORT: 5002
+      SPRING_DATASOURCE_URL: jdbc:sqlite:${BACKEND_DB_PATH:-/data/backend.db}
+      SPRING_SQL_INIT_MODE: always
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    ports:
+      - "${BACKEND_SERVICE_PORT:-5002}:5002"
+    volumes:
+      - backend-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5002/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  keycloak-data:
+  kong-declarative:
+  redis-data:
+  admin-data:
+  backend-data:

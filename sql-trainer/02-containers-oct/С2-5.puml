@@ -1,0 +1,105 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+title SQL Trainer — MVP 1.0 (один API Gateway + Execution с bulkhead/очередью/polling)
+
+Person(trainee, "Trainee", "Пользуется тренажёром")
+
+System_Boundary(front, "Front [Software System]") {
+  Container(web, "WEB", "JavaScript, React", "UI для trainee")
+}
+
+' ===== Единственный шлюз =====
+Container(gw, "API Gateway", "Spring Cloud Gateway", "Единая точка входа.\nJWT проверка, rate-limit.\nResilience: timeout, retry (safe), circuit breaker для внутренних REST-вызовов\n[MVP 1.0]")
+
+System_Ext(crm, "CRM Trainee", "Software System", "Передача и приём данных")
+System_Ext(kc, "Keycloak", "Software System", "Аутентификация и авторизация (OIDC)")
+System_Ext(ad, "Active Directory", "Software System", "LDAP/LDAPS")
+
+' ===== Users =====
+System_Boundary(usersb, "Сервис Пользователи [MVP]") {
+  Container(users, "Users", "Java", "Профили (без ролей/паролей)")
+  ContainerDb(usersdb, "Users DB", "PostgreSQL", "Профили пользователей")
+}
+
+' ===== Tasks =====
+System_Boundary(tasksb, "Сервис Задачи [MVP]") {
+  Container(tasks_stmt, "Tasks — Формулировки", "Java", "Условия")
+  Container(tasks_ans,  "Tasks — Ответы", "Java", "Эталонные ответы")
+  Container(tasks_erd,  "Tasks — ERD", "Java", "Описание учебных схем")
+  ContainerDb(tasksdb,  "Tasks DB", "PostgreSQL", "Данные по задачам")
+}
+
+' ===== Progress =====
+System_Boundary(progb, "Сервис Прогресс [MVP]") {
+  Container(progress, "Progress", "Java", "Учёт прогресса")
+  ContainerDb(progressdb, "Progress DB", "PostgreSQL", "Прогресс пользователей")
+}
+
+' ===== Execution (обновлено: N слотов + внутр. очередь, синхронный ответ) =====
+System_Boundary(execb, "Сервис Выполнения [MVP]") {
+  Container(exec_api, "Execution API", "Java",    "POST /exec/run (синхронно)\nВалидатор SQL, per-user cap\nОтветы: 200 / 408 (timeout) / 429 (capacity)")
+  Container(exec_queue, "Execution Queue", "In-Process",    "Внутренняя очередь ожидания (FIFO)\nQUEUE_DEPTH = K (короткая)\nПри переполнении → 429")
+  Container(exec_slots, "Execution Slot Pool", "Java threads",    "N слотов исполнения (bulkhead)\nКаждый слот: коннект из DB pool\nstatement_timeout, авто-LIMIT")
+}
+
+System_Ext(trainingpg, "Training PostgreSQL", "Database", "Учебные схемы; роль read-only")
+
+' ===== Relations =====
+Rel(trainee, web, "Пользуется")
+Rel(web, gw, "HTTP (REST)")
+
+Rel(gw, crm, "REST")
+
+Rel_R(web, kc, "OIDC логин/SSO", "HTTPS")
+Rel_R(gw, kc, "JWKS проверка JWT", "HTTPS")
+Rel_R(kc, ad, "Федерация пользователей", "LDAPS")
+
+Rel(gw, users, "REST")
+Rel(gw, tasks_stmt, "REST")
+Rel(gw, tasks_ans,  "REST")
+Rel(gw, tasks_erd,  "REST")
+Rel(gw, progress,   "REST")
+
+' ===== Execution маршрут через Gateway (обновлено) =====
+Rel(gw, exec_api, "POST /exec/run → 200 {rows} | 408 | 429", "REST/JSON")
+
+' Сервисы к БД
+Rel(users, usersdb, "READ/WRITE", "JDBC")
+Rel(tasks_stmt, tasksdb, "READ/WRITE", "JDBC")
+Rel(tasks_ans,  tasksdb, "READ/WRITE", "JDBC")
+Rel(tasks_erd,  tasksdb, "READ/WRITE", "JDBC")
+Rel(progress, progressdb, "READ/WRITE", "JDBC")
+
+' ===== Execution internal (обновлено) =====
+Rel(exec_api, exec_queue, "enqueue (если слоты заняты)", "in-proc")
+Rel(exec_api, exec_slots, "run напрямую (если есть свободный слот)", "in-proc")
+Rel(exec_queue, exec_slots, "dequeue → исполнение (FIFO, короткая очередь)", "in-proc")
+Rel(exec_slots, trainingpg, "Выполнение SQL (read-only)\nSET LOCAL statement_timeout; авто-LIMIT", "JDBC (ro)")
+
+' ===== Notes =====
+note right of gw
+"Resilience в Gateway:
+• Timeout для backend-вызовов
+• Retry (только safe: GET) при временных сбоях
+• Circuit Breaker для деградирующих сервисов
+"
+end note
+
+note right of gw
+"Graceful Shutdown (Gateway):
+• SIGTERM → временно не принимаем POST /exec/run (429/503 + Retry-After)
+• Текущие запросы завершаем в пределах timeout
+• readinessProbe = FAIL, затем закрываем соединения"
+end note
+
+note bottom of exec_slots
+"Execution (slots):
+• DB pool (min/max), prepared statements, фиксированный search_path
+• N слотов исполнения; per-user cap
+• statement_timeout ≤ 700–1000 мс; авто-LIMIT (например, 200) → {truncated=true}
+• При переполнении очереди — 429; при долгом SQL — 408"
+end note
+@enduml

@@ -1,0 +1,67 @@
+@startuml
+title Основной процесс подбора — без LLM
+
+hide footbox
+skinparam maxMessageSize 200
+skinparam sequenceMessageAlign center
+skinparam ArrowColor #455A64
+skinparam ParticipantBackgroundColor #E3F2FD
+skinparam ParticipantBorderColor #1565C0
+skinparam ActorBackgroundColor #FFF3E0
+skinparam ActorBorderColor #E65100
+skinparam DatabaseBackgroundColor #FFF8DC
+skinparam NoteBackgroundColor #FFF8DC
+skinparam NoteBorderColor #B38B00
+
+actor "Сотрудник" as U
+participant "Web UI" as W
+participant "API" as A
+participant "Matching" as M
+database "PostgreSQL" as DB
+
+note over U: Навыки уже выбраны\nпользователем вручную\n(без LLM)
+
+== 1. Запуск поиска ==
+
+U -> W: Открывает приложение\nСтавит фильтры\n(опыт, локация, зарплата)
+U -> W: Нажимает «Подобрать»
+W -> A: POST /match\n{filters, user_id}
+A -> DB: Проверить доступ\n(срок, блокировка)
+DB --> A: Доступ активен
+
+== 2. Подготовка данных ==
+
+A -> M: Старт подбора\n{user_id, filters}
+M -> DB: SELECT навыки пользователя\nFROM profile_skills\nWHERE user_id
+DB --> M: ["PostgreSQL", "Python", "Docker", ...]
+
+M -> DB: SELECT skill_group, aliases\nFROM taxonomy
+DB --> M: группы для косвенного\nсовпадения (SQL группа и т.д.)
+
+M -> DB: SELECT вакансии\nFROM vacancies\nWHERE experience, area, salary\n  AND published_at > today - 30d
+DB --> M: ~200 вакансий\nс key_skills
+
+== 3. Расчёт (детерминированный, без LLM) ==
+
+note over M
+  Для каждой вакансии:
+  1. Точные совпадения навыков → +
+  2. Косвенные (та же группа) → + с понижением
+  3. Отсутствующие навыки → снижают %
+  4. Сортировка по убыванию
+end note
+
+M -> DB: INSERT INTO search_results\n{user_id, vacancy_id, score, matched_skills}
+DB --> M: OK
+
+== 4. Результат ==
+
+M --> A: Ранжированный список\n[{vacancy, score, matched, missing}]
+A -> DB: Записать событие\n(user searched)
+A --> W: Вакансии с процентами
+W --> U: Карточки вакансий\nотсортированы по %
+
+U -> W: Кликает на вакансию
+W -> A: POST /vacancy/click
+A -> DB: Записать событие\n(vacancy clicked)
+@enduml

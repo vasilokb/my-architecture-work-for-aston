@@ -1,0 +1,30 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+title SQL Trainer — Контекст (React/Java, без брокера и gRPC)
+
+Person(stajer, "Стажёр", "Решает SQL-задачи, видит прогресс и рейтинг")
+Person(mentor, "Ментор/Тимлид", "Смотрит прогресс стажёров")
+Person(admin, "Администратор", "Создаёт и редактирует задания")
+
+System_Boundary(sys, "SQL Trainer"){
+  System(sqltrainer, "SQL Trainer", "Web UI + Backend + БД")
+}
+
+System_Ext(ad, "Active Directory", "LDAP/LDAPS (через адаптер)")
+System_Ext(crm, "CRM/Trainee", "Учёт прогресса и ачивок")
+System_Ext(db_sources, "Учебные/внешние БД", "PostgreSQL/MySQL/SQLite")
+System_Ext(analytics, "Мониторинг", "Prometheus/Grafana/Logs")
+System_Ext(ads, "Ad/News", "Монетизация (после MVP)")
+
+Rel(stajer, sqltrainer, "Работа с тренажёром", "HTTPS")
+Rel(mentor, crm, "Просмотр прогресса", "HTTPS")
+Rel(admin, sqltrainer, "Администрирование", "HTTPS")
+
+Rel(sqltrainer, ad, "Аутентификация (LDAP)", "LDAPS")
+Rel(sqltrainer, crm, "Синхронизация прогресса", "HTTPS/REST")
+Rel(sqltrainer, db_sources, "Read-only доступ", "JDBC")
+Rel(sqltrainer, analytics, "Метрики/логи", "HTTP/OTLP")
+Rel(sqltrainer, ads, "Запрос рекламы/новостей (опц.)", "HTTPS")
+@enduml

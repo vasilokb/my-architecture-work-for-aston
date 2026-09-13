@@ -1,0 +1,203 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Компонентная диаграмма — Liberty Investment (DDD-домены, кросс-доменные сервисы)
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 40
+skinparam backgroundColor transparent
+skinparam rectangle<<system_boundary>> {
+    BorderColor #2C3E50
+    BorderThickness 10
+}
+skinparam rectangle<<boundary>> {
+    BorderColor #8E44AD
+    BorderThickness 10
+}
+skinparam rectangle<<container_boundary>> {
+    BorderColor #16A085
+    BorderThickness 10
+}
+Person(клиент, "Клиент (Инвестор)", "Мобильное/веб-приложение")
+Person(сотрудник, "Сотрудник банка", "Администратор, трейдер, операционист")
+
+System_Ext(moex, "MOEX", "Котировки, рыночные данные")
+System_Ext(keycloak, "Keycloak", "Аутентификация клиентов")
+System_Ext(mail_server, "Почтовый сервер", "Email")
+System_Ext(дбо_банк, "ДБО", "Цифровой банк")
+
+System_Boundary(liberty, "Liberty Investment") {
+
+    Boundary(frontend, "Фронтенд") {
+        Container(react_app, "React SPA", "React 18, Vite, Redux Toolkit", "Клиентское приложение")
+    }
+
+    Boundary(infra_domain, "Инфраструктура") {
+        Container(api_gw, "API Gateway", "SCG WebFlux", "Маршрутизация, JwtFilter + AuthJwtFilter, Circuit Breaker")
+    }
+
+    Boundary(trading_domain, "Ядро инвестиционной торговли") {
+        Container(trading_svc, "trading-service", "Spring Boot", "Ордера, лимитные заявки, покупка портфелей, Outbox") #70AD47
+        Container(emulator_svc, "emulator-service", "Spring Boot, Kotlin", "Эмулятор биржи, обработка заявок, котировки MOEX") #5B9BD5
+        Container(catalog_svc, "catalog-service", "Spring Boot", "Каталог инструментов, портфели, котировки, избранное") #5B9BD5
+        Container(account_svc, "account-service", "Spring Boot", "Брокерские/депо/маржинальные счета, активы, история, рефералы") #5B9BD5
+        Container(account_test_svc, "account-service-test", "Spring Boot", "Брокер счета (back-office), активы, депо, история операций") #70AD47
+        Container_Boundary(mgmt_boundary, "management-service-pb") #3CB371 {
+            Component(mgmt_portfolio, "Управление портфелями", "Spring Boot", "CRUD портфелей, комиссии, тейк-профит, статусы\n[→ Ядро]")
+            Component(mgmt_education, "Администрирование обучения", "Spring Boot", "CRUD курсов, тем, уроков, категорий, тесты\n[→ Образование]")
+        }
+    }
+
+    Boundary(client_domain, "Клиенты") {
+        Container_Boundary(customer_boundary, "customer-service") #5B9BD5 {
+            Component(customer_identity, "Аутентификация / Регистрация", "Spring Boot + Keycloak", "JWT auth, refresh, registration, forgot/change password\n[→ Безопасность]")
+            Component(customer_profile, "Профиль клиента", "Spring Boot", "CRUD профиля, список клиентов\n[→ Клиенты]")
+            Component(customer_security, "2FA", "Spring Boot", "Включение/выключение 2FA (email/phone)\n[→ Безопасность]")
+            Component(customer_referral, "Рефералы", "Spring Boot", "Реферальная ссылка, верификация кода\n[→ Маркетинг]")
+            Component(customer_tax, "Данные 2-НДФЛ", "Spring Boot", "Данные клиента для справки 2-НДФЛ\n[→ Бухгалтерия и налоги]")
+        }
+    }
+
+    Boundary(crm_domain, "CRM") {
+        Container_Boundary(userinfo_boundary, "userinfo-service") #70AD47 {
+            Component(ui_crm, "Данные клиентов", "Spring Boot", "Просмотр/редактирование клиентов, экспорт, сброс пароля\n[→ CRM]")
+            Component(ui_managers, "Менеджеры клиентов", "RestClient / Kafka", "Привязка клиент→менеджер, данные менеджера\n[→ CRM]")
+            Component(ui_chat, "Чат с клиентами", "WebSocket", "Отправка сообщений, обновление диалога\n[→ CRM]")
+            Component(ui_kyc, "KYC-верификация", "Spring Boot + Kafka", "Получение и подтверждение верификации клиента\n[→ Комплаенс]")
+            Component(ui_blacklist, "Блокировка клиентов", "RestClient / Kafka", "Блокировка/разблокировка клиента\n[→ Комплаенс]")
+            Component(ui_audit, "Аудит действий", "RestClient / Kafka", "Просмотр и экспорт аудита действий сотрудников\n[→ Комплаенс]")
+            Component(ui_referral, "Рефералы", "RestClient / Kafka", "Регистрация рефералов, управление бонусами\n[→ Маркетинг]")
+            Component(ui_trading, "История торгов", "RestClient / Kafka", "Просмотр торговых операций клиента\n[→ Ядро]")
+            Component(ui_accounts, "Счета клиентов", "RestClient / Kafka", "Просмотр брокерских счетов клиента\n[→ Ядро]")
+        }
+    }
+
+    Boundary(security_domain, "Безопасность") {
+        Container(auth_svc, "auth-service", "Spring Boot", "Аутентификация сотрудников: OTP 2FA, роли, refresh, logout") #70AD47
+        Container(otp_svc, "otp-service", "Spring Boot", "Генерация и верификация OTP (customer_id, email)") #5B9BD5
+    }
+
+    Boundary(hr_domain, "Управление персоналом") {
+        Container_Boundary(employee_boundary, "employee-service") #70AD47 {
+            Component(emp_hr, "Управление персоналом", "Spring Boot", "CRUD сотрудников, паспорта, рабочие места, задачи, аудит\n[→ Управление персоналом]")
+            Component(emp_support, "Тикеты поддержки", "Spring Boot", "Создание тикета техподдержки сотрудником\n[→ Поддержка]")
+        }
+    }
+
+    Boundary(finance_domain, "Бухгалтерия и налоги") {
+        Container(tax_svc, "tax-service", "Spring Boot", "Расчёт НДФЛ (batch), многопоточность, откат зависших") #70AD47
+        Container(financial_svc, "financialtransactions-service", "Spring Boot", "История транзакций, отчёт по операциям") #70AD47
+    }
+
+    Boundary(doc_domain, "Документооборот") {
+        Container(document_svc, "document-service", "Spring Boot", "Документы клиента, PDF, 2-НДФЛ, скачивание, предпросмотр") #5B9BD5
+        Container(document_pb_svc, "document-service-pb", "Spring Boot", "Документы back-office: генерация с/без сохранения") #70AD47
+    }
+
+    Boundary(tariff_domain, "Тарифный модуль") {
+        Container(customercare_svc, "customercare-service", "Spring Boot", "Подключение платных услуг (SUBSCRIPTION/FREE/FIXED), договор") #70AD47
+    }
+
+    Boundary(education_domain, "Образование") {
+        Container(education_svc, "education-service", "Spring Boot", "Каталог курсов (CQRS read-side): фильтры, поиск, избранное") #70AD47
+        Container(test_svc, "test-service", "Spring Boot", "Квалификационные тесты: получение, проверка ответов") #70AD47
+    }
+
+    Boundary(support_domain, "Поддержка") {
+        Container(support_svc, "support-service", "Spring Boot", "Шаблоны ответов (создание заявок закомментировано)") #70AD47
+        Container(feedback_svc, "criticalfeedbackchannel", "Spring Boot", "Критические ошибки (публичный, без авторизации)") #70AD47
+    }
+
+    Boundary(notification_domain, "Уведомления") {
+        Container(notification_svc, "notification-service", "Spring Boot", "SSE push, настройки, история, прочитано") #5B9BD5
+        Container(newsfeed_svc, "newsfeed-service", "Spring Boot", "ПУСТОЙ — заглушка, нет контроллеров") #70AD47
+    }
+}
+
+Rel(клиент, react_app, "HTTPS")
+Rel(сотрудник, react_app, "HTTPS")
+
+Rel(дбо_банк, api_gw, "REST API", "HTTPS")
+Rel(api_gw, keycloak, "Token introspection", "HTTPS")
+Rel(emulator_svc, moex, "Котировки", "HTTPS/Feign")
+Rel(notification_svc, mail_server, "Email", "SMTP")
+
+Rel(react_app, api_gw, "REST API + SSE", "HTTPS")
+
+Rel(api_gw, trading_svc, "", "REST")
+Rel(api_gw, emulator_svc, "", "REST")
+Rel(api_gw, catalog_svc, "", "REST")
+Rel(api_gw, account_svc, "", "REST")
+Rel(api_gw, account_test_svc, "", "REST")
+Rel(api_gw, mgmt_portfolio, "", "REST")
+Rel(api_gw, mgmt_education, "", "REST")
+Rel(api_gw, customer_identity, "", "REST")
+Rel(api_gw, customer_profile, "", "REST")
+Rel(api_gw, customer_security, "", "REST")
+Rel(api_gw, customer_referral, "", "REST")
+Rel(api_gw, customer_tax, "", "REST")
+Rel(api_gw, ui_crm, "", "REST")
+Rel(api_gw, ui_kyc, "", "REST")
+Rel(api_gw, ui_blacklist, "", "REST")
+Rel(api_gw, ui_audit, "", "REST")
+Rel(api_gw, ui_referral, "", "REST")
+Rel(api_gw, ui_trading, "", "REST")
+Rel(api_gw, ui_accounts, "", "REST")
+Rel(api_gw, ui_managers, "", "REST")
+Rel(api_gw, ui_chat, "", "REST")
+Rel(api_gw, auth_svc, "", "REST")
+Rel(api_gw, otp_svc, "", "REST")
+Rel(api_gw, emp_hr, "", "REST")
+Rel(api_gw, emp_support, "", "REST")
+Rel(api_gw, tax_svc, "", "REST")
+Rel(api_gw, financial_svc, "", "REST")
+Rel(api_gw, document_svc, "", "REST")
+Rel(api_gw, document_pb_svc, "", "REST")
+Rel(api_gw, customercare_svc, "", "REST")
+Rel(api_gw, education_svc, "", "REST")
+Rel(api_gw, test_svc, "", "REST")
+Rel(api_gw, support_svc, "", "REST")
+Rel(api_gw, feedback_svc, "", "REST")
+Rel(api_gw, notification_svc, "", "REST")
+Rel(api_gw, newsfeed_svc, "", "REST")
+
+Rel(trading_svc, emulator_svc, "order_request / order_result, order_errors", "Kafka")
+Rel(emulator_svc, catalog_svc, "actual_* / actual_missing_request", "Kafka")
+Rel(trading_svc, catalog_svc, "getAssets, getPortfolio, getCurrentPrices", "Feign")
+Rel(trading_svc, account_svc, "getBrokerAccounts (Feign), accounts_request / trade_history (Kafka)", "")
+Rel(account_svc, document_svc, "generateDocuments / checkAccess", "Feign")
+Rel(trading_svc, notification_svc, "new_order, order_result_notification", "Kafka")
+
+Rel(account_svc, customer_profile, "getCustomerInfo, generateOtp", "Feign")
+Rel(otp_svc, customer_profile, "get2FAuthenticationStatus", "Feign")
+Rel(customer_identity, notification_svc, "user_auth_notification, user_registration", "Kafka")
+Rel(notification_svc, customer_profile, "getCustomerInfo", "Feign")
+Rel(account_svc, notification_svc, "account_changes, margin_call", "Kafka")
+Rel(otp_svc, notification_svc, "otp_notification", "Kafka")
+
+Rel(document_svc, customer_profile, "getCustomerInfo, getTaxInfo", "Feign")
+Rel(document_svc, tax_svc, "get2ndfl", "Feign")
+
+Rel(tax_svc, account_svc, "taxWithdraw", "Feign")
+
+Rel(customercare_svc, document_svc, "generateDocument", "Feign")
+Rel(customercare_svc, customer_profile, "getCustomer", "Feign")
+Rel(customercare_svc, account_svc, "getBrokerAccounts", "Feign")
+
+Rel(mgmt_portfolio, catalog_svc, "changePortfolio, getAllPortfolios", "Feign")
+Rel(mgmt_portfolio, financial_svc, "getTransactionsByCustomerId", "Feign")
+
+Rel(auth_svc, emp_hr, "register-account", "Kafka")
+Rel(emp_hr, ui_crm, "register-result", "Kafka")
+
+Rel(catalog_svc, notification_svc, "favourite_price", "Kafka")
+
+legend right
+  |= Цвет |= Репозиторий |
+  |<back:#5B9BD5>    </back>| client/backend/ (клиентские) |
+  |<back:#70AD47>   </back>| backend/ (back-office) |
+  |<back:#3CB371>   </back>| backend/ (кросс-доменный) |
+endlegend
+
+@enduml

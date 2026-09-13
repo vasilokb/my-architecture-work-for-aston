@@ -1,0 +1,170 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Диаграмма компонентов — auth-service (авторизация сотрудников, AS-IS)
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 22
+skinparam ranksep 16
+skinparam backgroundColor transparent
+skinparam defaultTextAlignment center
+skinparam ArrowColor #666666
+skinparam ComponentFontSize 10
+skinparam ContainerFontSize 11
+skinparam ContainerFontStyle bold
+
+' ЛЕГЕНДА ЦВЕТОВ (по слою архитектуры):
+'   #D6E4F0 = Web (контроллеры)
+'   #C6E0B4 = Application (сервисы-оркестраторы)
+'   #FFE699 = Domain logic (логики)
+'   #F8CBAD = Infrastructure (utils/kafka/storage)
+'   #F4B400 = риск / расхождение
+
+' ===================== ВНЕШНИЕ АКТОРЫ/СИСТЕМЫ =====================
+System_Ext(gw, "API Gateway", "AuthJwtFilter: 2 маршрута\n(/auth-service, /employee-service)\n+ x-role, x-permissions downstream")
+System_Ext(notif, "notification-service", "Доставка OTP / Push")
+System_Ext(emp, "employee-service", "Профиль сотрудника\n(register/delete через Kafka+Feign)")
+System_Ext(admin_user, "Администратор", "Регистрация/редактирование\nсотрудников, ролей, прав")
+
+' ===================== ГРАНИЦА СЕРВИСА =====================
+Container_Boundary(svc, "auth-service  (Spring Boot 3.5.5, STATELESS)") {
+
+    ' --------------------- WEB ---------------------
+    Boundary(web, "Web-слой (REST)") {
+        Component(ctrl_free, "AuthFreeController", "REST", "Публичные:\n/authentication/initiate|confirm,\n/password-reset/*, /otp/refresh") #D6E4F0
+        Component(ctrl_emp, "AuthEmployeesController", "REST", "Авторизованные:\n/refresh, /verify*, /access/verify,\n/logout, /change-password|phone,\n/first-login/*, /otp/send") #D6E4F0
+        Component(ctrl_adm, "AuthAdminController", "REST", "Роль Admin:\n/account/register, /edit-account,\n/edit-roles, /edit-permissions") #D6E4F0
+        Component(validation, "AuthCustomValidation", "Bean", "Валидация DTO запросов") #D6E4F0
+    }
+
+    ' --------------------- APPLICATION ---------------------
+    Boundary(app, "Application (оркестрация)") {
+        Component(s_token, "AuthTokenService", "Service", "login, refreshToken,\nlogout, deserialize\n(role/permissions/claims)") #C6E0B4
+        Component(s_access, "AuthAccessService", "Service", "verifyAccess(headers, roles[,permission])\n— RBAC: роль + право") #C6E0B4
+        Component(s_event, "AuthEventService", "Service", "registerEvent(...): запуск\nпроцедур с OTP-подтверждением") #C6E0B4
+        Component(s_emp, "AuthEmployeeService", "Service", "editPassword, editPhone,\nresetPassword, firstChangePassword") #C6E0B4
+        Component(s_admin, "AuthAdminService", "Service", "register, editAccount,\neditRoles, editPermissions, delete") #C6E0B4
+        Component(s_verify, "AuthVerificationService", "Service", "checkAttempts (анти-брутфорс),\nverify (жизненный цикл OTP)") #C6E0B4
+    }
+
+    ' --------------------- DOMAIN LOGIC ---------------------
+    Boundary(logic, "Domain logic (CRUD + проверки)") {
+        Component(l_emp, "EmployeeService", "Logic", "сотрудник, checkStatus\n(blocked/deleted)") #FFE699
+        Component(l_cred, "CredentialsService", "Logic", "пароль, isFirstLogin,\nfailedAttempts, lockTime") #FFE699
+        Component(l_sess, "SessionService", "Logic", "сессия: access/refresh,\nпризнак отзыва 'logout'") #FFE699
+        Component(l_roles, "RolesService", "Logic", "роли (4 типа)") #FFE699
+        Component(l_perm, "PermissionsService", "Logic", "права по roleId") #FFE699
+        Component(l_evt, "EventCodeService", "Logic", "OTP-события, checkEvent,\n expiredAt (1м)") #FFE699
+        Component(l_audit, "AuditLogService", "Logic", "аудит действий") #FFE699
+    }
+
+    ' --------------------- INFRASTRUCTURE ---------------------
+    Boundary(infra, "Infrastructure") {
+        Component(u_jwt, "ProcessingTokenUtil", "Util (jjwt)", "JWT HS256: generate/parse,\nclaims {employee_id,roles,rights}") #F8CBAD
+        Component(u_otp, "ProcessingOtpCodeUtil", "Util", "генерация 6-значного OTP") #F8CBAD
+        Component(u_enc, "ProcessingEncryptionUtil", "Util", "шифрование полей\n(username/email/phone/otp)") #F8CBAD
+        Component(kafka_send, "AuthKafkaSenderService", "Producer", "→ security-notification\n(отправка OTP)") #F8CBAD
+        Component(kafka_list, "AuthMessageListener", "Consumer", "← otp-result\n(результат доставки)") #F8CBAD
+        Component(cfg, "SettingSecurityManagement", "Config", "STATELESS;\n/api/v1/auth-service/** → permitAll\n(токен проверяется внутри)") #F8CBAD
+    }
+
+    Db(auth_db, "auth_db", "PostgreSQL", "Employee, Credentials, Session,\nRole, Permission, EventCode, AuditLog") #FFFFFF
+}
+
+' ===================== СВЯЗИ: GATEWAY → КОНТРОЛЛЕРЫ =====================
+Rel(gw, ctrl_free, "REST permitAll", "public")
+Rel(gw, ctrl_emp, "REST + Bearer", "auth")
+Rel(gw, ctrl_adm, "REST + Bearer (Admin)", "auth+role")
+Rel(admin_user, ctrl_adm, "управляет", "admin")
+
+' ===================== СВЯЗИ: КОНТРОЛЛЕРЫ → СЕРВИСЫ =====================
+Rel(ctrl_free, s_event, "initiate/reset")
+Rel(ctrl_free, s_token, "confirm → login")
+Rel(ctrl_free, s_emp, "resetPassword")
+Rel(ctrl_emp, s_access, "verifyAccess (каждый эндпоинт)")
+Rel(ctrl_emp, s_token, "refresh/verify/logout")
+Rel(ctrl_emp, s_event, "change-pwd/phone initiate")
+Rel(ctrl_emp, s_emp, "change-pwd/phone confirm")
+Rel(ctrl_adm, s_admin, "register/edit/roles/permissions")
+Rel(ctrl_free, validation, "valid()")
+Rel(ctrl_emp, validation, "valid()")
+Rel(ctrl_adm, validation, "valid()")
+
+' ===================== СВЯЗИ: СЕРВИСЫ → ЛОГИКИ/UTILS =====================
+Rel(s_token, u_jwt, "generate/parse token")
+Rel(s_token, l_sess, "get/update session")
+Rel(s_token, l_evt, "checkEvent")
+Rel(s_token, l_emp, "checkStatus")
+Rel(s_token, l_cred, "isFirstLogin / update")
+Rel(s_token, l_audit, "save (LOGIN/LOGOUT/REFRESH)")
+
+Rel(s_access, u_jwt, "parseToken(headers)")
+Rel(s_access, l_sess, "checkSession активна")
+Rel(s_access, l_emp, "checkStatus + roleId")
+Rel(s_access, l_roles, "getByName + сверка roleId")
+Rel(s_access, l_perm, "getAllByRoleId (RBAC)")
+
+Rel(s_event, s_verify, "checkAttempts / verify")
+Rel(s_event, l_evt, "save EventCode")
+Rel(s_event, kafka_send, "send OTP")
+Rel(s_verify, l_cred, "failedAttempts/lockTime")
+Rel(s_verify, u_otp, "generateOtp")
+Rel(s_verify, l_evt, "registerEvent/refresh")
+
+Rel(s_emp, l_evt, "checkEvent (подтверждение)")
+Rel(s_emp, l_cred, "update password")
+Rel(s_emp, l_emp, "update phone/checkStatus")
+Rel(s_emp, u_jwt, "generate token")
+Rel(s_emp, l_sess, "update session")
+Rel(s_emp, l_audit, "save")
+
+Rel(s_admin, l_emp, "save/update/delete")
+Rel(s_admin, l_cred, "save/delete")
+Rel(s_admin, l_sess, "update (revoke при edit)")
+Rel(s_admin, l_roles, "get/save/update")
+Rel(s_admin, l_perm, "get/save/update")
+Rel(s_admin, l_audit, "save")
+
+' ===================== ЛОГИКИ → STORAGE/ENC =====================
+Rel(l_emp, u_enc, "encode при поиске")
+Rel(l_cred, u_enc, "encode (password?)")
+Rel(l_evt, u_enc, "encode codeOtp/json")
+
+' ===================== INFRA → DB =====================
+Rel(l_emp, auth_db, "JDBC", "")
+Rel(l_cred, auth_db, "JDBC", "")
+Rel(l_sess, auth_db, "JDBC", "")
+Rel(l_roles, auth_db, "JDBC", "")
+Rel(l_perm, auth_db, "JDBC", "")
+Rel(l_evt, auth_db, "JDBC", "")
+Rel(l_audit, auth_db, "JDBC", "")
+
+' ===================== KAFKA / ВНЕШНИЕ =====================
+Rel(kafka_send, notif, "security-notification", "Kafka")
+Rel(notif, kafka_list, "otp-result", "Kafka")
+Rel(s_admin, emp, "register/delete (verify)", "Feign")
+Rel(kafka_send, emp, "register-account", "Kafka")
+
+note bottom of u_jwt #F4B400
+  <b>Риски инфраструктуры:</b>
+   • HS256 — симметричная подпись (любой downstream
+     с секретом может выпускать токены).
+   • JWT-секрет по умолчанию захардкожен:
+     [redacted].
+   • Пароль сотрудника сравнивается как plaintext
+     (CredentialsService, без BCrypt).
+   • Отзыв токена = строка "logout" в Session, без blacklist jti.
+end note
+
+legend right
+  |= Цвет |= Слой |
+  |<back:#D6E4F0>   </back>| Web (REST-контроллеры) |
+  |<back:#C6E0B4>   </back>| Application (оркестрация) |
+  |<back:#FFE699>   </back>| Domain logic (CRUD + проверки) |
+  |<back:#F8CBAD>   </back>| Infrastructure (utils / kafka / config) |
+  |<back:#F4B400>   </back>| Риск / расхождение |
+  |<back:#FFFFFF>   </back>| Хранилище |
+endlegend
+
+@enduml

@@ -1,0 +1,48 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - MVP поиска вакансий для уходящих сотрудников
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 40
+
+' === АКТОР ===
+Person(employee, "Уходящий сотрудник", "Ищет релевантные вакансии по специальности и навыкам")
+
+' === СИСТЕМА ===
+System_Boundary(careerAggregator, "Career Aggregator System (MVP)") {
+
+    Container(webApp, "Web Application", "Streamlit", "Интерфейс: поисковая строка, чекбоксы навыков, список вакансий")
+
+    Container(apiGateway, "API Gateway", "FastAPI", "Прием запросов, маршрутизация, rate limiting")
+
+    Container(searchService, "Search Service", "Python/FastAPI", "Основной сервис: LLM-парсинг запроса, поиск в HH.ru, семантическое ранжирование")
+
+    ContainerDb(cache, "In-Memory Cache", "Python lru_cache", "Кэширование LLM-ответов и результатов поиска")
+
+    Container(embeddingEngine, "Embedding Engine", "Sentence-Transformers", "Генерация эмбеддингов для ранжирования (all-MiniLM-L6-v2)")
+
+    ContainerDb(database, "Database", "PostgreSQL", "Хранение профилей пользователей, истории запросов, вакансий")
+}
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(deepseek, "DeepSeek API", "LLM для преобразования запроса в структурированные параметры")
+
+System_Ext(headHunter, "HH.ru API", "Источник вакансий (поиск в реальном времени)")
+
+' === СВЯЗИ ===
+Rel(employee, webApp, "Вводит запрос, получает вакансии", "HTTPS")
+
+Rel(webApp, apiGateway, "POST /api/search", "HTTPS/REST")
+
+Rel(apiGateway, searchService, "Вызывает поиск", "REST")
+
+Rel(searchService, deepseek, "Преобразование запроса в JSON", "HTTPS")
+Rel(searchService, headHunter, "Поиск вакансий", "HTTPS")
+Rel(searchService, embeddingEngine, "Генерация эмбеддингов", "in-process")
+Rel(searchService, cache, "Чтение/запись кэша", "in-process")
+Rel(searchService, database, "Сохранение профилей, истории запросов, вакансий", "TCP")
+
+@enduml

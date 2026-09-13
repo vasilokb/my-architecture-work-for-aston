@@ -1,0 +1,61 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+title SQL Trainer — Контейнерная диаграмма
+
+Person(stajer, "Стажёр")
+Person(mentor, "Ментор/Тимлид")
+Person(admin, "Администратор")
+
+System_Boundary(sqlt, "SQL Trainer"){
+  Container(ui, "Web UI", "React/TypeScript", "Тёмная/светлая тема, фильтры/сортировки задач, редактор SQL, результаты")
+  Container(api, "API Gateway + Backend", "Java/Spring Boot", "REST/gRPC; маршрутизация, бизнес-правила, безопасность")
+  Container(auth, "Auth Proxy", "Keycloak (LDAP Federation) / Custom Auth", "OIDC для UI, LDAP к AD")
+  Container(tasks, "Task Service", "Spring Boot", "CRUD задач, фильтры, теги, сложности, рейтинги задач")
+  Container(schema, "DB Catalog & Schema Viewer", "Spring Boot", "Инспекция схем/связей, визуализация структуры БД")
+  Container(hints, "Hints Service", "Spring Boot", "Контекстные подсказки без ссылок на статьи; автодополнение")
+  Container(run, "Query Runner", "JVM Worker + JDBC", "Безопасный read-only запуск SQL в песочнице")
+  Container(check, "Answer Checker", "Spring Boot", "Сравнение эталона с результатом, assert-правила")
+  Container(score, "Scoring & Rating", "Spring Boot", "Рейтинг пользователя, ачивки, время выполнения")
+  Container(progress, "Progress Sync", "Spring Boot", "Синхронизация прогресса с CRM/«серым тренажёром»")
+  Container(admin_ui, "Admin UI", "React", "Управление заданиями, наборами данных, экзаменами (позже)")
+  ContainerDb(db, "Trainer DB", "PostgreSQL", "Задания, попытки, результаты, рейтинги, пользователи")
+  Container(cache, "Cache", "Redis", "Сессии, throttle, кеш подсказок/схем")
+  ContainerQueue(q, "Event Bus", "Kafka/RabbitMQ", "Асинхронные события: SUBMISSION_DONE, PROGRESS_SYNC")
+  Container(obj, "Object Storage", "S3-совместимое", "Датасеты, экспорт результатов")
+}
+
+System_Ext(ad, "Active Directory", "LDAP/LDAPS")
+System_Ext(crm, "Серый тренажёр / CRM Trainee", "API/Webhooks")
+System_Ext(dbs, "Учебные/внешние БД", "PostgreSQL/MySQL/SQLite 等")
+System_Ext(analytics, "Аналитика/Мониторинг", "Prometheus/Grafana/ELK/OTel")
+System_Ext(ads, "Ad/News Provider", "Провайдер монетизации")
+
+Rel(stajer, ui, "Работа с тренажёром", "HTTPS")
+Rel(admin, admin_ui, "Администрирование", "HTTPS")
+Rel(ui, auth, "OIDC", "HTTPS")
+Rel(auth, ad, "LDAP Bind / Federation", "LDAPS")
+
+Rel(ui, api, "REST", "HTTPS")
+Rel(admin_ui, api, "REST", "HTTPS")
+Rel(api, tasks, "REST/gRPC", "")
+Rel(api, schema, "REST/gRPC", "")
+Rel(api, hints, "REST/gRPC", "")
+Rel(api, run, "RPC", "gRPC/JMS")
+Rel(run, dbs, "SQL (read-only)", "JDBC/ODBC")
+Rel(run, check, "Результаты/снэпшоты", "gRPC/REST")
+Rel(check, score, "Оценка/время", "gRPC/REST")
+Rel(score, progress, "Событие успеха", "Async via Kafka/Rabbit")
+Rel(progress, crm, "Пуш прогресса/ачивок", "HTTPS/Webhook")
+
+Rel(api, db, "R/W", "SQL")
+Rel(tasks, db, "R/W", "SQL")
+Rel(schema, db, "R/W", "SQL")
+Rel(hints, cache, "Кеш подсказок", "")
+Rel(api, q, "Публикация событий", "Async")
+Rel(run, obj, "Чтение датасетов", "S3 API")
+Rel(api, analytics, "Метрики/логи/трейсы", "OTLP")
+Rel(ui, ads, "Показ рекламы/новостей (после MVP)", "HTTPS")
+
+@enduml

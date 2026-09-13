@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Как навыки хранятся в Google Sheets</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f0f2f5; color: #1a1a2e; padding: 20px; }
+  h2 { margin-bottom: 4px; font-size: 20px; }
+  h3 { margin-bottom: 4px; font-size: 15px; }
+  .section { margin-bottom: 40px; }
+  .hint { color: #666; font-size: 13px; margin-bottom: 14px; }
+
+  .sheet {
+    border: 1px solid #c0c0c0; border-radius: 4px; overflow: hidden;
+    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  }
+  .sheet-bar {
+    background: #1a73e8; color: #fff; padding: 8px 14px; font-size: 14px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sheet-bar .tab { background: #fff; color: #1a73e8; padding: 3px 14px; border-radius: 3px 3px 0 0; font-size: 13px; font-weight: 700; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; }
+  th { background: #f8f9fa; font-weight: 600; }
+  .col-letter { background: #f8f9fa; color: #999; font-size: 11px; text-align: center; width: 36px; }
+  .row-num { background: #f8f9fa; color: #999; font-size: 11px; text-align: center; width: 36px; }
+  td.skill-name { font-weight: 600; }
+  td.alias { color: #1a73e8; }
+  td.level-3 { background: #e6f9ed; color: #1a7a3a; font-weight: 700; text-align: center; }
+  td.level-2 { background: #fff8e6; color: #8a6a00; font-weight: 700; text-align: center; }
+  td.level-1 { background: #fde8e8; color: #a02828; font-weight: 700; text-align: center; }
+  td.level-0 { background: #f5f5f5; color: #bbb; text-align: center; }
+  td.vac-skill { color: #1a73e8; }
+
+  .note { background: #fff8e6; border: 1px solid #d6b656; border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-top: 12px; }
+  .note-green { background: #e6f9ed; border: 1px solid #82b366; }
+  .note-blue { background: #e8f0fe; border: 1px solid #6c8ebf; }
+  .arrow-down { text-align: center; font-size: 24px; color: #4a6cf7; margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<!-- ==================== ТАБЛИЦА 1: ТАКСОНОМИЯ ==================== -->
+<div class="section">
+  <h2>Таблица 1 — Справочник навыков (таксономия)</h2>
+  <div class="hint">Это отдельный лист в Google Sheets. Описывает структуру: какие бывают группы навыков, какие навыки внутри групп, и синонимы (как одно и то же может называться по-разному). Эту таблицу заполняем мы, не HH.</div>
+
+  <div class="sheet">
+    <div class="sheet-bar">
+      📋 skill_taxonomy
+      <span class="tab">Лист1</span>
+    </div>
+    <table>
+      <tr>
+        <th class="col-letter"></th>
+        <th>A: group</th>
+        <th>B: skill</th>
+        <th>C: aliases</th>
+        <th>D: weight</th>
+      </tr>
+      <tr>
+        <td class="row-num">1</td>
+        <td>Базы данных</td>
+        <td class="skill-name">PostgreSQL</td>
+        <td class="alias">postgres; pg; постгрес; postgresql</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">2</td>
+        <td>Базы данных</td>
+        <td class="skill-name">MS SQL</td>
+        <td class="alias">mssql; t-sql; microsoft sql server</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">3</td>
+        <td>Базы данных</td>
+        <td class="skill-name">MySQL</td>
+        <td class="alias">my sql; mariadb; мария</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">4</td>
+        <td>Базы данных</td>
+        <td class="skill-name">ClickHouse</td>
+        <td class="alias">click house; ch; кликхаус</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">5</td>
+        <td>Базы данных</td>
+        <td class="skill-name">Oracle SQL</td>
+        <td class="alias">oracle; pl/sql; plsql</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">6</td>
+        <td>Базы данных</td>
+        <td class="skill-name">Redis</td>
+        <td class="alias">редис; redis cache</td>
+        <td>0.8</td>
+      </tr>
+      <tr>
+        <td class="row-num">7</td>
+        <td>Языки</td>
+        <td class="skill-name">Python</td>
+        <td class="alias">python3; питон; py</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">8</td>
+        <td>Языки</td>
+        <td class="skill-name">Java</td>
+        <td class="alias">jvm; ява</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">9</td>
+        <td>Языки</td>
+        <td class="skill-name">Go</td>
+        <td class="alias">golang; го</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">10</td>
+        <td>Фреймворки</td>
+        <td class="skill-name">FastAPI</td>
+        <td class="alias">fast api; fast-api</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">11</td>
+        <td>Фреймворки</td>
+        <td class="skill-name">Django</td>
+        <td class="alias">джанго; django rest</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">12</td>
+        <td>DevOps</td>
+        <td class="skill-name">Docker</td>
+        <td class="alias">контейнеры; docker compose</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num">13</td>
+        <td>DevOps</td>
+        <td class="skill-name">Kubernetes</td>
+        <td class="alias">k8s; кубернетес</td>
+        <td>1.0</td>
+      </tr>
+      <tr>
+        <td class="row-num" style="color:#ccc">14</td>
+        <td colspan="4" style="color:#999;text-align:center;font-style:italic;">... и так далее, ~100-200 строк ...</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="note note-green">
+    <b>Колонка group</b> — к какой категории относится навык (Базы данных, Языки, Фреймворки, DevOps...).<br>
+    <b>Колонка skill</b> — canonical-название (одно на навык, как в HH).<br>
+    <b>Колонка aliases</b> — синонимы через точку с запятой. Если HH пишет "postgres", а в skill написано "PostgreSQL" — это один навык.<br>
+    <b>Колонка weight</b> — вес навыка в матчинге. Redis и ClickHouse — обе "Базы данных", но Redis ближе к PostgreSQL, чем ClickHouse.
+  </div>
+</div>
+
+
+<!-- ==================== ТАБЛИЦА 2: ВАКАНСИИ ==================== -->
+<div class="section">
+  <h2>Таблица 2 — Вакансии из HH (плоская, как есть)</h2>
+  <div class="hint">Этот лист лабпроект выгружает автоматически. Навыки — просто текст через точку с запятой, без групп и уровней.</div>
+
+  <div class="sheet">
+    <div class="sheet-bar">
+      📋 vacancies
+      <span class="tab">Лист1</span>
+    </div>
+    <table>
+      <tr>
+        <th class="col-letter"></th>
+        <th>A: id</th>
+        <th>B: title</th>
+        <th>C: company</th>
+        <th>D: key_skills</th>
+        <th>E: salary_from</th>
+      </tr>
+      <tr>
+        <td class="row-num">1</td>
+        <td>49123871</td>
+        <td>Backend Python</td>
+        <td>Т-Банк</td>
+        <td class="vac-skill">Python; PostgreSQL; FastAPI; Docker; Redis</td>
+        <td>350000</td>
+      </tr>
+      <tr>
+        <td class="row-num">2</td>
+        <td>49123872</td>
+        <td>Data Engineer</td>
+        <td>Авито</td>
+        <td class="vac-skill">Python; SQL; ClickHouse; Airflow; Spark</td>
+        <td>300000</td>
+      </tr>
+      <tr>
+        <td class="row-num">3</td>
+        <td>49123873</td>
+        <td>DevOps инженер</td>
+        <td>Сбер</td>
+        <td class="vac-skill">Docker; Linux; Kubernetes; Terraform</td>
+        <td>280000</td>
+      </tr>
+      <tr>
+        <td class="row-num" style="color:#ccc">4</td>
+        <td colspan="5" style="color:#999;text-align:center;font-style:italic;">... ~1500-2000 строк ...</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+
+<!-- ==================== КАК ОНИ СОЕДИНЯЮТСЯ ==================== -->
+<div class="section">
+  <h2>Как таблицы соединяются в рантайме</h2>
+  <div class="hint">В коде: берём вакансию, режем key_skills по точке с запятой, каждый навык ищем в таксономии.</div>
+
+  <div class="sheet">
+    <div class="sheet-bar" style="background:#1a7a3a;">🔧 Что делает код (services.py)</div>
+    <table>
+      <tr>
+        <th>Шаг</th>
+        <th>Что происходит</th>
+        <th>Пример</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td>Берём навыки вакансии из колонки D</td>
+        <td><code>"Python; PostgreSQL; FastAPI; Docker; Redis"</code></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>Режем по <code>;</code></td>
+        <td><code>["Python", "PostgreSQL", "FastAPI", "Docker", "Redis"]</code></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>Каждый ищем в <b>Таблице 1</b> (таксономии) по колонке skill и aliases</td>
+        <td style="font-size:12px;">
+          "Python" → group: <b>Языки</b><br>
+          "PostgreSQL" → group: <b>Базы данных</b><br>
+          "Docker" → group: <b>DevOps</b><br>
+          "FastAPI" → group: <b>Фреймворки</b><br>
+          "Redis" → group: <b>Базы данных</b>
+        </td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>Теперь знаем: вакансия требует навыки из групп <b>Языки</b>, <b>Базы данных</b>, <b>Фреймворки</b>, <b>DevOps</b></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>Сравниваем с навыками кандидата (он тоже выбирал из таксономии, с уровнями)</td>
+        <td style="font-size:12px;">
+          Кандидат знает PostgreSQL (уровень 3) из группы <b>Базы данных</b><br>
+          Вакансия требует PostgreSQL из группы <b>Базы данных</b><br>
+          → <b>точное совпадение, 100%</b><br><br>
+          Кандидат НЕ знает ClickHouse, но знает PostgreSQL — обе из группы <b>Базы данных</b><br>
+          → <b>косвенное совпадение, 30%</b>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="note note-blue">
+    <b>Итого:</b> две таблицы в одном Google Sheets. <b>skill_taxonomy</b> (заполняем мы) + <b>vacancies</b> (выгружает лабпроект). Код читает обе через gspread, соединяет по названию навыка, сравнивает группы для определения косвенных совпадений.
+  </div>
+</div>
+
+</body>
+</html>

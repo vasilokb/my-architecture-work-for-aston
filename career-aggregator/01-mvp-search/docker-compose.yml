@@ -1,0 +1,96 @@
+services:
+  # Redis для кэширования
+  redis:
+    image: redis:7-alpine
+    container_name: career-aggregator-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - career-aggregator-network
+
+  # FastAPI бэкенд
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: career-aggregator-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app
+      - ./logs:/logs
+    command: >
+      sh -c "python -m uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 2 --log-level info"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - career-aggregator-network
+
+  # Streamlit веб-интерфейс
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: career-aggregator-streamlit
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - API_URL=http://api:8000
+      - STREAMLIT_HOST=0.0.0.0
+      - STREAMLIT_PORT=8501
+      - STREAMLIT_THEME=light
+      - STREAMLIT_GATHER_USAGE_STATS=false
+    env_file:
+      - .env
+    volumes:
+      - ./app/ui:/app
+    command: >
+      sh -c "streamlit run app/ui/main.py --server.address 0.0.0.0 --server.port 8501 --server.headless true --theme.base light --browser.gatherUsageStats false"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - career-aggregator-network
+
+# Сети
+networks:
+  career-aggregator-network:
+    driver: bridge
+    name: career-aggregator-network
+
+# Тома для постоянного хранения данных
+volumes:
+  redis_data:
+    driver: local
+    name: career-aggregator-redis-data

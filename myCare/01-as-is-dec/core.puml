@@ -1,0 +1,104 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Policy Core: Микроядерная архитектура
+
+' ==== Внешние системы ====
+System_Ext(rating_engine, "Rating Engine", "Расчет тарифов")
+System_Ext(uw_service, "Underwriting Service", "Проверка риска")
+System_Ext(customer_master, "Customer Master", "Данные клиентов")
+System_Ext(billing_service, "Billing Service", "Биллинг и платежи")
+System_Ext(claims_service, "Claims Service", "Урегулирование убытков")
+System_Ext(agent_portal, "Agent Portal", "Портал агентов")
+System_Ext(customer_portal, "Customer Portal", "ЛК клиента")
+
+' ==== Граница Policy Core ====
+Boundary(policy_core, "Policy Core (Microkernel)") {
+
+  ' --- Ядро системы ---
+  Container(policy_kernel, "Policy Kernel", "Java 17, Spring Boot 3",    "Базовые сущности и жизненный цикл полиса")
+
+  Container(product_catalog, "Product Catalog", "Java 17, Spring Boot 3",    "Каталог страховых продуктов и программ")
+
+  Container(policy_api, "Policy API Gateway", "Spring Cloud Gateway",    "Единая точка входа для операций с полисами")
+
+  ' --- Базы данных ---
+  ContainerDb(policy_db, "Policy Database", "PostgreSQL 15",    "Хранение полисов, покрытий, рисков")
+
+  ContainerDb(product_config_db, "Product Config Database", "PostgreSQL 15",    "Конфигурации продуктов и шаблоны")
+
+  ' --- Продуктовые плагины (Product Plugins) ---
+  Container(auto_plugin, "Auto Insurance Plugin", "Java 17, Spring Boot",    "Логика автострахования: ОСАГО, КАСКО")
+
+  Container(property_plugin, "Property Insurance Plugin", "Java 17, Spring Boot",    "Логика имущественного страхования")
+
+  Container(health_plugin, "Health Insurance Plugin", "Java 17, Spring Boot",    "Логика медицинского страхования")
+
+  Container(travel_plugin, "Travel Insurance Plugin", "Java 17, Spring Boot",    "Логика страхования путешествий")
+
+  Container(life_plugin, "Life Insurance Plugin", "Java 17, Spring Boot",    "Логика страхования жизни")
+
+  ' --- Общие плагины (Shared Plugins) ---
+  Container(validation_plugin, "Validation Plugin", "Java 17, Spring Boot",    "Валидация данных и бизнес-правил")
+
+  Container(audit_plugin, "Audit Plugin", "Java 17, Spring Boot",    "Аудит изменений и история")
+
+  Container(document_plugin, "Document Plugin", "Java 17, Spring Boot",    "Генерация документов и шаблонов")
+}
+
+' ==== Инфраструктурные компоненты ====
+Container(event_bus, "Event Bus", "Apache Kafka",  "Событийная шина для интеграций")
+
+Container(cache, "Cache Service", "Redis",  "Кэширование справочников и данных")
+
+Container(config_server, "Config Server", "Spring Cloud Config",  "Управление конфигурациями")
+
+' ===== СВЯЗИ =====
+
+' --- Внешние системы -> Policy API ---
+Rel(agent_portal, policy_api, "REST API", "HTTPS/JSON")
+Rel(customer_portal, policy_api, "REST API", "HTTPS/JSON")
+Rel(rating_engine, policy_api, "Расчет премии", "gRPC")
+Rel(uw_service, policy_api, "Проверка риска", "gRPC")
+
+' --- API Gateway -> Ядро ---
+Rel(policy_api, policy_kernel, "Обработка запросов", "HTTP/REST")
+Rel(policy_api, product_catalog, "Запрос конфигурации", "HTTP/REST")
+
+' --- Ядро -> Плагины ---
+Rel(policy_kernel, auto_plugin, "Автострахование", "Plugin API")
+Rel(policy_kernel, property_plugin, "Имущественное страхование", "Plugin API")
+Rel(policy_kernel, health_plugin, "Медстрахование", "Plugin API")
+Rel(policy_kernel, travel_plugin, "Страхование путешествий", "Plugin API")
+Rel(policy_kernel, life_plugin, "Страхование жизни", "Plugin API")
+
+Rel(policy_kernel, validation_plugin, "Валидация", "Plugin API")
+Rel(policy_kernel, audit_plugin, "Аудит", "Plugin API")
+Rel(policy_kernel, document_plugin, "Документы", "Plugin API")
+
+' --- Ядро -> Базы данных ---
+Rel(policy_kernel, policy_db, "CRUD операций", "JDBC")
+Rel(product_catalog, product_config_db, "Конфигурации", "JDBC")
+Rel(auto_plugin, policy_db, "Специфичные данные", "JDBC")
+Rel(property_plugin, policy_db, "Специфичные данные", "JDBC")
+
+' --- Ядро -> Внешние сервисы ---
+Rel(policy_kernel, customer_master, "Данные клиента", "HTTP/REST")
+Rel(policy_kernel, billing_service, "Создание счетов", "HTTP/REST")
+Rel(policy_kernel, claims_service, "Регистрация убытков", "HTTP/REST")
+
+' --- Событийная интеграция ---
+Rel(policy_kernel, event_bus, "Публикация событий", "Kafka Producer")
+Rel(auto_plugin, event_bus, "Специфичные события", "Kafka Producer")
+Rel(event_bus, billing_service, "События для биллинга", "Kafka Consumer")
+Rel(event_bus, claims_service, "События для убытков", "Kafka Consumer")
+
+' --- Кэширование ---
+Rel(policy_kernel, cache, "Кэш справочников", "Redis Client")
+Rel(product_catalog, cache, "Кэш продуктов", "Redis Client")
+
+' --- Конфигурация ---
+Rel(policy_kernel, config_server, "Конфигурация", "HTTP")
+Rel(auto_plugin, config_server, "Конфигурация плагина", "HTTP")
+
+@enduml

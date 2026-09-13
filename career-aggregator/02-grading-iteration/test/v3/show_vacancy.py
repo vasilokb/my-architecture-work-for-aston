@@ -1,0 +1,10 @@
+import sys; sys.stdout.reconfigure(encoding='utf-8')
+import sqlite3
+conn = sqlite3.connect('vacancies.db')
+c = conn.cursor()
+c.execute("SELECT length(requirement), length(responsibility), substr(requirement, 1, 2000), substr(responsibility, 1, 2000) FROM vacancies WHERE hh_id = '132053577'")
+r = c.fetchone()
+print(f"Requirement length: {r[0]} chars")
+print(f"Responsibility length: {r[1]} chars")
+print(f"\n--- FULL REQUIREMENT ---\n{r[2]}")
+print(f"\n--- FULL RESPONSIBILITY ---\n{r[3]}")

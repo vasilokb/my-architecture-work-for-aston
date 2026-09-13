@@ -1,0 +1,95 @@
+SQL
+PostgreSQL
+Oracle
+MySQL
+BPMN
+UML
+ER-диаграммы
+REST API
+SOAP
+GraphQL
+Python
+Java
+Spring
+C#
+JavaScript
+TypeScript
+React
+Angular
+Vue
+Docker
+Kubernetes
+Git
+Linux
+Bash
+Jenkins
+CI/CD
+Agile
+Scrum
+Kanban
+Jira
+Confluence
+Microservices
+Kafka
+RabbitMQ
+Redis
+MongoDB
+Elasticsearch
+Tableau
+Power BI
+Excel
+VBA
+Power Query
+DAX
+ETL
+DWH
+Data Vault
+Snowflake
+ClickHouse
+Hadoop
+Spark
+Airflow
+ML
+TensorFlow
+PyTorch
+NLP
+Computer Vision
+DevOps
+Ansible
+Terraform
+AWS
+Azure
+GCP
+1C
+Delphi
+C++
+Use Case
+User Story
+DFD
+IDEF0
+ArchiMate
+TOGAF
+Enterprise Architecture
+Camunda
+Bizagi
+ARIS
+Visio
+Miro
+Figma
+Balsamiq
+Mockups
+Swagger
+OpenAPI
+Postman
+SoapUI
+XML
+JSON
+XSD
+Google Sheets
+Waterfall
+RUP
+Requirements Elicitation
+Requirement Management
+Process Mining
+Celonis
+CBAP

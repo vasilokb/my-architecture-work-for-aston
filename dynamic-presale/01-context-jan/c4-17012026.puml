@@ -1,0 +1,66 @@
+@startuml
+title MVP: AI Presale Estimation Platform (Ollama + OpenWebUI) + PDF support
+
+skinparam shadowing false
+skinparam componentStyle rectangle
+
+actor User as user
+
+rectangle "Web UI" {
+  component "OpenWebUI\n(AI Console + RAG)\n- Presets (prompts)\n- File upload\n- Chat / Alternatives" as openwebui
+  component "Presale UI\n(Tables & Editing)\n- Epics / Tasks\n- PERT\n- Filters\n- Export buttons" as presale_ui
+}
+
+rectangle "Backend Layer" {
+  component "Presale API\n(FastAPI / Spring)\n- Presales CRUD\n- Versions\n- Roles & Rates\n- Exports" as api
+  component "Worker Queue\n- Async jobs\n- Status tracking" as queue
+  component "AI Orchestrator\n- Prompt builder\n- JSON validation\n- Retry / timeout" as orchestrator
+  component "Document Parser\n- DOCX/TXT extract\n- PDF text layer extract\n- Normalization\n- Chunking" as parser
+}
+
+rectangle "AI & Data" {
+  component "Ollama\n(Local LLM)\n- Decomposition\n- Estimation\n- Alternatives" as ollama
+  component "Vector Store\n(RAG)\n- Past presales\n- Knowledge base" as vectordb
+  component "OCR Engine (optional)\n(Tesseract/PaddleOCR)\n- Scanned PDF -> text" as ocr
+}
+
+rectangle "Storage" {
+  database "PostgreSQL\n- Presales\n- Epics/Tasks\n- Versions\n- Rates\n- Extracted text metadata\n  (source, pages, confidence)" as db
+  database "Object Storage\n(Minio/S3)\n- Originals: DOCX/PDF/TXT\n- Uploaded files" as storage
+}
+
+user --> openwebui : Prompt / Files / Chat
+user --> presale_ui : Edit / Review / Export
+
+openwebui --> api : Start analysis\nLoad preset
+presale_ui --> api : Read / Update results
+
+api --> storage : Store / read original files
+api --> db : CRUD presales\nSave versions
+api --> queue : Enqueue analysis job
+
+queue --> parser : Extract text from files
+parser --> storage : Get originals
+parser --> ocr : OCR only if\nno text layer in PDF
+ocr --> parser : OCR text
+parser --> db : Save extracted text\n+ quality metadata
+
+queue --> orchestrator : Run AI using extracted text
+orchestrator --> db : Load extracted text\n+ user prompt/params
+orchestrator --> ollama : Prompt (JSON schema)
+ollama --> orchestrator : Structured result
+
+orchestrator --> db : Save epics/tasks\nPERT estimates
+orchestrator --> vectordb : Index final version
+
+openwebui --> vectordb : RAG search
+presale_ui <-- db : Results / Versions
+
+note bottom of parser
+  PDF support requires:
+  - try text layer extract first
+  - fallback to OCR for scanned PDFs
+  - persist extraction source/quality for debugging
+end note
+
+@enduml

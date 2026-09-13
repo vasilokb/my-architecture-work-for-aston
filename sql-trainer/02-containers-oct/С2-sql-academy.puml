@@ -1,0 +1,135 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_LEFT_RIGHT()
+title SQL Academy — Исправленная архитектура (Container level)
+
+Person(student, "Ученик", "Решает задачи, смотрит решения, получает сертификаты")
+Person(mentor, "Ментор/Автор", "Создаёт/правит задания, управляет датасетами")
+
+System_Boundary(sa, "SQL Academy Platform (Cloud/K8s)") {
+
+  ' ===== FRONTEND & EDGE =====
+  Container(spa, "Web SPA", "React/TypeScript", "Редактор SQL, каталог, профиль, сертификаты")
+  Container(cdn, "CDN/Static", "S3/CloudFront/Nginx", "JS/CSS/изображения")
+  Container_Boundary(edge, "Edge/Gateway"){
+    Container(ing, "Ingress/WAF", "Nginx Ingress", "TLS, HSTS, WAF, rate-limit L7")
+    Container(bff, "API Gateway/BFF", "Node.js/Spring", "Фасад для SPA, агрегация/тенантинг, WS/poll")
+  }
+
+  ' ===== CORE DOMAINS =====
+  Container(auth, "Auth", "Service", "Email+пароль, JWT/refresh, сброс пароля")
+  Container(oauth, "Social OAuth", "Service", "Яндекс/VK/Google логин")
+  Container(tasks, "Tasks/Catalog", "Service", "Каталог задач, фильтры, темы, подсказки")
+  Container(schemaApi, "Schema/Metadata", "Service", "ER-схемы и описания учебных БД")
+  Container(progress, "Progress/Attempts", "Service", "История отправок, статус задач, метрики по пользователю")
+  Container(cert, "Certificates", "Service", "Подсчёт условий (например, 50 задач), генерация PDF/PNG")
+  Container(billing, "Billing/Subscriptions", "Service", "Премиум, paywall, вебхуки провайдера")
+  Container(admin, "Admin/CMS", "React+API", "Редактор задач, импорт датасетов, предпросмотр эталонов")
+  Container(notify, "Notifications", "Service", "Email/SMS/Push по событиям")
+
+  ' ===== EXECUTION SUBSYSTEM (исправленная архитектура) =====
+  Container_Boundary(exec, "SQL Execution Subsystem") {
+    Container(execApi, "Execution API", "Service", "Единая точка входа для SQL execution")
+    Container(ratelim, "RateLimiter", "Redis", "Token-bucket + Concurrency leases (per user/session)")
+    Container(queue, "Job Queue", "Redis/RabbitMQ", "Очередь SQL job'ов, приоритеты, ретраи, DLQ")
+    Container(router, "Execution Router", "Service", "Маршрутизация по движку и датасету, учет квот/пула")
+    Container(grader, "Grader", "Service", "Сравнение результата с эталоном/инвариантами, начисление баллов")
+    Container(logs, "Exec Logs/Results", "Service", "Протокол выполнения, ошибки, планы, тайминги")
+
+    Container_Boundary(mysqlPool, "MySQL Engine Pool"){
+      Container(poolMy, "Pool Manager (MySQL)", "Service", "Warm-up/lease контейнеров MySQL 8.1, health")
+      Container(runnerMy, "Runner (MySQL)", "Container", "sanitize, row cap, timeout, KILL long query")
+      ContainerDb(dsMy, "Datasets (MySQL, RO)", "MySQL 8.1", "Напр.: «Авиаперелёты», другие учебные БД")
+    }
+
+    Container_Boundary(pgPool, "PostgreSQL Engine Pool"){
+      Container(poolPg, "Pool Manager (PostgreSQL)", "Service", "Warm-up/lease контейнеров PostgreSQL, health")
+      Container(runnerPg, "Runner (PostgreSQL)", "Container", "sanitize, statement_timeout, row cap")
+      ContainerDb(dsPg, "Datasets (PostgreSQL, RO)", "PostgreSQL", "Напр.: «Расписание», другие учебные БД")
+    }
+  }
+
+  ' ===== DATA STORES =====
+  ContainerDb(usersDb, "Users/Auth DB", "PostgreSQL", "Учётные записи, refresh-сессии")
+  ContainerDb(contentDb, "Catalog DB", "PostgreSQL", "Задания, подсказки, эталоны (метаданные)")
+  ContainerDb(etalonDb, "Etalon/Tests DB", "PostgreSQL", "Эталонные ответы и проверки")
+  ContainerDb(progressDb, "Progress DB", "PostgreSQL", "Попытки, статусы, длительности")
+  ContainerDb(billingDb, "Billing DB", "PostgreSQL", "Подписки, инвойсы, транзакции")
+  Container(store, "Object Storage", "S3/GCS", "PDF/PNG сертификатов, ER-изображения")
+  Container(obs, "Observability", "Grafana/Prometheus/Loki/Sentry", "Метрики, логи, алерты")
+
+}
+
+' ===== EXTERNALS =====
+System_Ext(pay, "Payment Provider", "Stripe/CloudPayments", "Чекаут, вебхуки")
+System_Ext(ya, "Yandex OAuth", "", "OAuth2")
+System_Ext(vk, "VK OAuth", "", "OAuth2")
+System_Ext(gg, "Google OIDC", "", "OIDC")
+System_Ext(mail, "Mail/SMS Provider", "", "Транзакционная рассылка")
+
+' ===== FLOWS =====
+Rel(student, cdn, "Загружает SPA", "HTTPS")
+Rel(student, ing, "API/WS", "HTTPS")
+Rel(cdn, spa, "Статика SPA")
+Rel(ing, bff, "Proxy", "HTTP/2")
+
+' Auth
+Rel(bff, auth, "login/register")
+Rel(auth, usersDb, "учётные записи/сессии")
+Rel(auth, oauth, "social login")
+Rel(oauth, ya, "OAuth2"); Rel(oauth, vk, "OAuth2"); Rel(oauth, gg, "OIDC")
+
+' Catalog/Schema
+Rel(bff, tasks, "каталог/фильтры")
+Rel(tasks, contentDb, "CRUD")
+Rel(bff, schemaApi, "ER/метаданные")
+Rel(schemaApi, contentDb, "чтение описаний")
+
+' Billing/Certificates/Notifications
+Rel(bff, billing, "проверка/активация премиума")
+Rel(billing, billingDb, "статусы")
+Rel(billing, pay, "чекаут/вебхуки")
+Rel(bff, cert, "запрос сертификата")
+Rel(cert, progressDb, "чтение прогресса")
+Rel(cert, store, "запись PDF/PNG")
+Rel(student, store, "скачивание сертификата", "HTTPS")
+Rel(billing, notify, "события оплаты")
+Rel(notify, mail, "email/sms")
+
+' ===== ИСПРАВЛЕННЫЙ EXECUTION FLOW =====
+Rel(bff, execApi, "submit SQL execution")
+Rel(execApi, ratelim, "acquire lease (per user/session)")
+Rel(execApi, queue, "enqueue job (если lease выдан)")
+Rel(queue, router, "dispatch job")
+Rel(router, poolMy, "route if engine=MySQL")
+Rel(router, poolPg, "route if engine=PostgreSQL")
+Rel(poolMy, runnerMy, "lease/start")
+Rel(poolPg, runnerPg, "lease/start")
+Rel(runnerMy, dsMy, "RO connect")
+Rel(runnerPg, dsPg, "RO connect")
+Rel(runnerMy, grader, "snapshot")
+Rel(runnerPg, grader, "snapshot")
+Rel(grader, etalonDb, "load tests")
+Rel(grader, progressDb, "write attempt/verdict")
+Rel(runnerMy, logs, "exec logs")
+Rel(runnerPg, logs, "exec logs")
+Rel(grader, ratelim, "release lease (после финала/ошибки)")
+Rel(execApi, progress, "poll status/results")
+Rel(progress, progressDb, "история/метрики")
+
+' Observability
+Rel(spa, obs, "web vitals")
+Rel(bff, obs, "latency, errors")
+Rel(execApi, obs, "execution metrics")
+Rel(queue, obs, "queue depth")
+Rel(poolMy, obs, "timeouts/kills (MySQL)")
+Rel(poolPg, obs, "timeouts/kills (PostgreSQL)")
+
+' Admin
+Rel(mentor, admin, "управление заданиями/датасетами")
+Rel(admin, contentDb, "контент")
+Rel(admin, dsMy, "импорт учебных БД (MySQL)")
+Rel(admin, dsPg, "импорт учебных БД (PostgreSQL)")
+
+SHOW_LEGEND()
+@enduml

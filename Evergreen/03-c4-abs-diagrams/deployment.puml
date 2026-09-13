@@ -1,0 +1,128 @@
+@startuml
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam linetype ortho
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam padding 6
+skinparam ArrowColor #333333
+skinparam LineColor  #333333
+skinparam DefaultTextAlignment left
+
+skinparam rectangle {
+  BackgroundColor<<K8S>> #F9F9F9
+  BorderColor<<K8S>> #555555
+}
+
+skinparam node {
+  BackgroundColor<<EDGE>> #FFF2CC
+  BackgroundColor<<APP>>  #E6F3FF
+  BackgroundColor<<MGMT>> #F2F2FF
+  BackgroundColor<<DATA>> #F3F7F3
+  BackgroundColor<<EXT>>  #FFF7E6
+}
+
+title MVP ABS Platform — Deployment Diagram (Nodes & Pods Level)
+
+actor "Банк-Клиент\n(API Consumer)" as Bank
+actor "Admin Platform\n(Platform Operator)" as Admin
+
+' ========== ОБЛАКА / ВНЕШНИЕ СИСТЕМЫ ==========
+
+cloud "Internet" as INET
+
+node "External Identity Provider" as IDP <<EXT>> {
+    component "[Keycloak]\n(Pod)" as KC
+}
+
+node "Data Zone (Cloud Managed Services)" as DATA <<DATA>> {
+    database "PostgreSQL (Master)\nShared Schema + RLS" as PG_M
+    database "PostgreSQL (Replica)\nRead-only" as PG_R
+    database "Keycloak DB\n(PostgreSQL)" as KC_DB
+    [Kafka\n(Message Broker)] as KAFKA
+    database "Audit Storage\n(Elasticsearch / ClickHouse)" as AUD_DB
+}
+
+' ========== КЛАСТЕР KUBERNETES (ГЛАВНАЯ ГРАНИЦА) ==========
+
+rectangle "Kubernetes Cluster" <<K8S>> {
+    
+    ' Слой входа
+    node "Ingress Nodes" as EDGE <<EDGE>> {
+        component "[Istio Ingress Gateway]\n(Pod)" as ISTIO
+    }
+
+    ' Слой API & Безопасности
+    node "Gateway Nodes" as GW <<APP>> {
+        component "[API Gateway Kong]\n(Pod)" as KONG
+        component "[OPA (PDP)]\n(Pod)" as OPA
+        artifact "Rego Policies\n(ConfigMap)" as REGO
+    }
+
+    ' Ядро бизнеса
+    node "Business Worker Nodes" as APP <<APP>> {
+        component "[Transaction Service]\n(Pod)" as TXN
+        component "[CQRS Read Service]\n(Pod)" as CQRS
+        component "[Account Service]\n(Pod)" as ACC
+        component "[Client Service]\n(Pod)" as CLI
+        
+        ' Восстановленный сервис
+        component "[Audit Indexer Service]\n(Pod)" as AUD_IDX
+        note right of AUD_IDX
+          <b>Асинхронный воркер:</b>
+          Читает из Kafka, формирует
+          bulk-запросы в Elastic/ClickHouse
+        end note
+    }
+
+    ' Выделенная зона администрирования
+    node "Management Zone (Admin)" as MGMT <<MGMT>> {
+        component "[Admin Web UI]\n(Pod)" as ADMIN_UI
+        component "[Audit Admin UI]\n(Pod)" as AUDIT_UI
+    }
+
+    ' Внутренние связи K8s (mTLS обеспечивается Istio)
+    REGO --> OPA  : Load Policies
+}
+
+' --- СВЯЗИ (АРХИТЕКТУРНЫЙ ФЛОУ) ---
+
+' Внешний вход
+Bank -[#1E90FF]-> INET : HTTPS
+Admin -[#8B4513,dashed]-> INET : HTTPS (VPN)
+INET -[#1E90FF]-> ISTIO : External Traffic
+
+' Маршрутизация и Безопасность
+ISTIO -[#333333]-> KONG : HTTP (Load Balanced)
+KONG ..> KC   : Get JWKS
+KONG -[#8B0000]-> OPA  : POST JSON (Timeout 50ms)
+
+' Бизнес потоки
+KONG -[#2E8B57]-> TXN  : HTTP
+KONG -[#2E8B57]-> CQRS : HTTP
+
+' Межсервисное взаимодействие (mTLS via Istio)
+TXN -[#4682B4]-> ACC  : HTTP
+TXN -[#4682B4]-> CLI  : HTTP
+
+' Аудит (Асинхронный пайплайн)
+TXN -[#8B4513]-> KAFKA  : Publish Audit Events
+ACC -[#8B4513]-> KAFKA  : Publish Audit Events
+KAFKA -[#8B4513]-> AUD_IDX  : Consume Events
+AUD_IDX -[#8B4513]-> AUD_DB : Index Documents (Bulk API)
+
+' Данные (БД)
+KC  -[#2E8B57]-> KC_DB : JDBC/SQL
+TXN -[#2E8B57]-> PG_M  : Write SQL
+CQRS -[#2E8B57]-> PG_R : Read SQL
+PG_M -[#2E8B57]-> PG_R : Streaming Replication
+
+' Административный флоу
+KONG -[#8B4513]-> ADMIN_UI : HTTP (Internal Routing)
+KONG -[#8B4513]-> AUDIT_UI : HTTP (Internal Routing)
+
+' Audit UI читает напрямую из хранилища
+AUDIT_UI -[#8B4513]-> AUD_DB : Search / Read Logs (HTTP)
+
+@enduml

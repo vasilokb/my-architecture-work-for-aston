@@ -1,0 +1,201 @@
+@startuml
+skinparam backgroundColor #F5F5F5
+skinparam defaultFontName Arial
+skinparam linetype ortho
+skinparam shadowing false
+skinparam dpi 180
+
+!define DEV_COLOR #E6F3FF
+!define STAGE_COLOR #FFF2CC
+!define PROD_COLOR #FFE6E6
+
+' === Палитра ===
+skinparam node<<PROD>> {
+  BackgroundColor #FFE6E6
+  BorderColor #8B0000
+}
+skinparam node<<STAGE>> {
+  BackgroundColor #FFF2CC
+  BorderColor #DAA520
+}
+skinparam node<<DEV>> {
+  BackgroundColor #E6F3FF
+  BorderColor #1E90FF
+}
+
+' === Инфраструктура ===
+cloud "Andersen Internal Infrastructure" as ANDERSEN #FFF2CC {
+  node "CI/CD Pipeline" <<DEV>> as CI_CD {
+    [<color:#666>GitHub</color>\nSource Code] as GITHUB #CCCCCC
+    [<color:#666>Jenkins</color>\nArgoCD] as ARGOCD #CCCCCC
+    database "<color:#666>Harbor</color>\nDocker Registry" as HARBOR #CCCCCC
+  }
+
+  node "Identity Provider" as IDENTITY {
+    [<color:#666>Keycloak</color>\nOIDC Provider] as KEYCLOAK #CCCCCC
+  }
+}
+
+cloud "Hetzner Cloud\nKubernetes Cluster" as HETZNER #FFE6E6
+ANDERSEN ..> HETZNER : TLS/SSL VPN
+
+' === Kubernetes Cluster Architecture ===
+node "Kubernetes Cluster" <<PROD>> as K8S_CLUSTER {
+  node "Control Plane" <<PROD>> as CONTROL_PLANE {
+    [<color:#666>kube-apiserver</color>] as API_SERVER #CCCCCC
+    [<color:#666>etcd</color>] as ETCD #CCCCCC
+    [<color:#666>kube-controller-manager</color>] as CONTROLLER #CCCCCC
+  }
+
+  node "Worker Nodes (3+ nodes)" <<PROD>> as WORKER_NODES {
+
+    frame "Ingress Layer" {
+      [<color:#4169E1>Ingress NGINX</color>\nK8s Ingress Controller] as INGRESS #DAE8FC
+      [<color:#4169E1>Cert-Manager</color>\nTLS Certificates] as CERT_MANAGER #DAE8FC
+    }
+
+    frame "Application Namespace: sql-trainer" {
+
+      frame "Frontend Deployment" {
+        [<color:#4169E1>Web SPA</color>\nReact/TypeScript] as FRONTEND #DAE8FC
+        database ["<color:#666>ConfigMap</color>\nEnvironment] as FRONTEND_CM #CCCCCC
+      }
+
+      frame "Backend Services" {
+        [<color:#4169E1>API Gateway</color>\nSpring Cloud Gateway] as GATEWAY #DAE8FC
+
+        node "Microservices" {
+          [<color:#4169E1>Users Service</color>] as USERS #DAE8FC
+          [<color:#4169E1>Tasks Service</color>] as TASKS #DAE8FC
+          [<color:#4169E1>Progress Service</color>] as PROGRESS #DAE8FC
+          [<color:#8B0000>Execution Service</color>\nN slots + queue] as EXECUTION #F8CECC
+        }
+
+        database ["<color:#666>Redis</color>\nRate Limiting] as REDIS #CCCCCC
+      }
+    }
+
+    frame "Database Layer" {
+      frame "StatefulSets" {
+        database ["<color:#2E8B57>Users DB</color>\nPostgreSQL] as USERS_DB #D5E8D4
+        database ["<color:#2E8B57>Tasks DB</color>\nPostgreSQL] as TASKS_DB #D5E8D4
+        database ["<color:#2E8B57>Progress DB</color>\nPostgreSQL] as PROGRESS_DB #D5E8D4
+        database ["<color:#2E8B57>Training PostgreSQL</color>\nRead-only] as TRAINING_DB #D5E8D4
+      }
+
+      database ["<color:#666>Persistent Volumes</color>\nSSD Storage] as PV #CCCCCC
+    }
+
+    frame "Monitoring Stack" {
+      [<color:#666>Prometheus</color>\nMetrics] as PROMETHEUS #CCCCCC
+      [<color:#666>Grafana</color>\nDashboards] as GRAFANA #CCCCCC
+      [<color:#666>Loki</color>\nLogging] as LOKI #CCCCCC
+    }
+  }
+}
+
+' === Stage & Dev Environments ===
+node "Stage Environment" <<STAGE>> as STAGE {
+  node "K8s Cluster (Stage)" <<STAGE>> as STAGE_K8S {
+    [<color:#4169E1>All Services</color>] as STAGE_SERVICES #DAE8FC
+    database ["<color:#2E8B57>Stage Databases</color>] as STAGE_DBS #D5E8D4
+  }
+}
+
+node "Dev Environment" <<DEV>> as DEV {
+  node "K8s Cluster (Dev)" <<DEV>> as DEV_K8S {
+    [<color:#4169E1>All Services</color>] as DEV_SERVICES #DAE8FC
+    database ["<color:#2E8B57>Dev Databases</color>] as DEV_DBS #D5E8D4
+  }
+}
+
+' === CI/CD Flow ===
+GITHUB -[#008000]-> ARGOCD : GitOps - Application Manifests
+HARBOR -[#008000]-> ARGOCD : Docker Images
+ARGOCD -[#008000]-> DEV_K8S : Auto-sync Dev
+ARGOCD -[#008000]-> STAGE_K8S : Auto-sync Stage
+ARGOCD -[#008000,dashed]-> K8S_CLUSTER : Manual Sync Approval
+
+' === User Access ===
+[<color:#1E90FF>Trainee</color>\nSQL Student] as TRAINEE #FFD700
+[<color:#1E90FF>Mentor</color>\nTask Author] as MENTOR #FFD700
+
+TRAINEE -[#1E90FF]-> INGRESS : https://sql-trainer.andersenlab.com
+MENTOR -[#1E90FF]-> INGRESS : Admin features
+
+' === Authentication ===
+FRONTEND -[#FF4500]-> KEYCLOAK : OIDC Login
+GATEWAY -[#FF4500]-> KEYCLOAK : JWT Validation
+
+' === Service Communication ===
+' === Service Communication (исправлено) ===
+INGRESS -[#1E90FF]-> FRONTEND : /* (static files)
+INGRESS -[#1E90FF]-> GATEWAY : /api/* (API requests)
+
+GATEWAY -[#1E90FF]-> USERS : /api/users/**
+GATEWAY -[#1E90FF]-> TASKS : /api/tasks/**
+GATEWAY -[#1E90FF]-> PROGRESS : /api/progress/**
+GATEWAY -[#1E90FF]-> EXECUTION : /api/exec/**
+
+
+
+GATEWAY -[#1E90FF]-> REDIS : Rate Limiting
+
+USERS -[#2E8B57]-> USERS_DB : JDBC
+TASKS -[#2E8B57]-> TASKS_DB : JDBC
+PROGRESS -[#2E8B57]-> PROGRESS_DB : JDBC
+EXECUTION -[#2E8B57]-> TRAINING_DB : JDBC Read-only
+
+' === Monitoring ===
+USERS -[#666]-> PROMETHEUS : Metrics
+TASKS -[#666]-> PROMETHEUS : Metrics
+PROGRESS -[#666]-> PROMETHEUS : Metrics
+EXECUTION -[#666]-> PROMETHEUS : SQL Metrics
+GATEWAY -[#666]-> PROMETHEUS : API Metrics
+INGRESS -[#666]-> PROMETHEUS : Access Metrics
+INGRESS -[#666]-> LOKI : Access Logs
+
+' === Storage ===
+USERS_DB -[#2E8B57]-> PV : Persistent Storage
+TASKS_DB -[#2E8B57]-> PV : Persistent Storage
+PROGRESS_DB -[#2E8B57]-> PV : Persistent Storage
+TRAINING_DB -[#2E8B57]-> PV : Persistent Storage
+
+' === Internal Notes ===
+note right of EXECUTION
+  <b>Execution Service:</b>
+  • HPA: 2-10 replicas
+  • Resource limits: 1CPU, 2GB RAM
+  • 10-20 slots per pod
+  • SQL timeout: 800ms
+  • Read-only training data
+end note
+
+note right of WORKER_NODES
+  <b>K8s Advantages:</b>
+  • Auto-scaling (HPA)
+  • Self-healing
+  • Rolling updates
+  • Resource optimization
+  • Service discovery
+end note
+
+note right of INGRESS
+  <b>Ingress Features:</b>
+  • TLS termination
+  • Load balancing
+  • Path-based routing
+  • Rate limiting
+  • SSL redirect
+end note
+
+legend right
+  | Color | Purpose |
+  | Blue | Application Services |
+  | Red | Critical Service |
+  | Green | Data Flow |
+  | Orange | Authentication |
+  | Gray | Infrastructure |
+end legend
+
+@enduml

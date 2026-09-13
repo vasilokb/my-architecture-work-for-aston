@@ -1,0 +1,122 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - MVP (с авторизацией, ролями, сетевым размещением и справочником компетенций)
+
+LAYOUT_TOP_DOWN()
+
+' ========== АКТОРЫ (ПОЛЬЗОВАТЕЛИ) ==========
+Person(employee, "Уволенный сотрудник", "Доступ на 2 месяца, просмотр вакансий, матчинг")
+Person(consultant, "Карьерный консультант", "Управление профилями, аналитика, администрирование")
+Person(admin, "Администратор (DevOps)", "Настройка расписания, мониторинг, управление ML-задачами (через UI)")
+
+' ========== ВНЕШНЯЯ СЕТЬ (INTERNET) ==========
+System_Ext(internet, "Интернет", "Доступ уволенных сотрудников и консультантов (вне корпоративной сети)")
+
+' ========== ВНУТРЕННЯЯ СЕТЬ (КОРПОРАТИВНАЯ) ==========
+System_Boundary(corpNetwork, "Корпоративная сеть (закрыта для уволенных)") {
+    ' Здесь могут быть внутренние системы, но в MVP они не используются
+}
+
+' ========== СИСТЕМА (РАЗМЕЩЕНА В DMZ / ОБЛАКЕ) ==========
+System_Boundary(careerAggregator, "Career Aggregator System (размещена в DMZ / облаке)") {
+
+    ' === ВЕБ-ИНТЕРФЕЙС (ЕДИНЫЙ ПОРТАЛ) ===
+    Container(webApp, "Web Application", "Streamlit", "Интерфейс для всех ролей. Доступ через HTTPS из интернета.")
+
+    ' === СЕРВИС АВТОРИЗАЦИИ ===
+    Container(auth, "Auth Service", "Python/FastAPI", "Регистрация, логин, JWT-токены, проверка ролей, ограничение срока действия учётной записи (2 месяца).")
+
+    ' ========== ML PIPELINE ==========
+    rectangle "ML Pipeline" {
+        Container(extractor, "Competency Extractor", "Python-задача", "Загружает сырые вакансии из HH.ru, извлекает компетенции через LLM")
+        Container(normalizer, "Competency Normalizer", "Python-задача", "Кластеризует и нормализует компетенции, строит справочники")
+    }
+
+    ' ========== PRODUCT LOGIC ==========
+    rectangle "Product Logic" {
+        Container(dict, "Competency Dictionary", "Python-сервис", "Предоставляет read-only API для получения компетенций, категорий, синонимов. Кэширует данные in-memory.")
+        Container(grading, "Vacancy Grading", "Python-сервис (с шедулером)", "По расписанию загружает новые вакансии, извлекает требования (компетенции + уровни) через LLM")
+        Container(matching, "Candidate Matching", "Python-сервис", "По запросу сотрудника или консультанта: матчинг профиля кандидата с вакансиями, gap-анализ")
+        Container(profileManager, "Profile Manager", "Python-сервис", "CRUD для профилей позиций и профилей кандидатов (компетенции с уровнями)")
+    }
+
+    ' === БАЗА ДАННЫХ ===
+    ContainerDb(db, "Database", "SQLite / PostgreSQL", "Хранит все данные: справочники, вакансии, требования, профили, результаты матчинга, учётные записи")
+}
+
+' ========== ВНЕШНИЕ СИСТЕМЫ ==========
+System_Ext(hh, "HH.ru API", "Вакансии (список + полные описания)")
+System_Ext(llm, "OpenRouter API", "LLM (Perplexity / DeepSeek и др.)")
+
+' ========== СВЯЗИ АКТОРОВ С WEB-ИНТЕРФЕЙСОМ (ЧЕРЕЗ ИНТЕРНЕТ) ==========
+Rel(employee, internet, "Доступ через браузер", "HTTPS")
+Rel(consultant, internet, "Доступ через браузер", "HTTPS")
+Rel(admin, internet, "Доступ через браузер", "HTTPS")
+Rel(internet, webApp, "Входящие запросы", "HTTPS")
+
+' ========== АВТОРИЗАЦИЯ ==========
+Rel(webApp, auth, "Проверка логина/пароля, получение JWT", "REST")
+Rel(auth, db, "Читает учётные записи, роли, срок действия", "SQL")
+
+' ========== ВЗАИМОДЕЙСТВИЕ WEBAPP С СЕРВИСАМИ ==========
+Rel(webApp, profileManager, "Управление профилями (CRUD)", "REST")
+Rel(webApp, matching, "Запуск матчинга для сотрудника/консультанта", "REST")
+Rel(webApp, grading, "Передаёт настройки расписания (через Admin UI)", "REST")
+Rel(webApp, extractor, "Запуск ML-задачи (администратор)", "REST")
+Rel(webApp, normalizer, "Запуск ML-задачи (администратор)", "REST")
+
+' ========== ML PIPELINE ==========
+Rel(extractor, hh, "Загружает сырые вакансии", "HTTPS")
+Rel(extractor, llm, "Извлекает сырые компетенции", "HTTPS")
+Rel(extractor, db, "Сохраняет vacancies, raw_competencies", "SQL")
+
+Rel(normalizer, db, "Читает raw_competencies, пишет справочники (competencies, variants, categories, links)", "SQL")
+
+' ========== PRODUCT LOGIC - ЧТЕНИЕ СПРАВОЧНИКА ==========
+Rel(dict, db, "Загружает справочники в кэш при старте и периодически", "SQL")
+Rel(profileManager, dict, "Получает список компетенций/категорий для UI", "REST")
+Rel(matching, dict, "Получает competency_id по названию (через синонимы)", "REST")
+Rel(grading, dict, "Получает competency_id для сохранения требований", "REST")
+
+' ========== PRODUCT LOGIC - ОСТАЛЬНЫЕ СВЯЗИ ==========
+Rel(grading, hh, "Загружает новые вакансии (по расписанию)", "HTTPS")
+Rel(grading, llm, "Извлекает требования (компетенции + уровни)", "HTTPS")
+Rel(grading, db, "Пишет parsed_vacancies, parsed_requirements", "SQL")
+
+Rel(profileManager, db, "Читает/пишет профили (компетенции с уровнями)", "SQL")
+
+Rel(matching, db, "Читает профили, требования; пишет результаты матчинга", "SQL")
+Rel(matching, llm, "Опционально – уточняет уровень кандидата при загрузке CV", "HTTPS")
+
+' ========== КОНСУЛЬТАНТ/СОТРУДНИК ЧИТАЮТ РЕЗУЛЬТАТЫ ЧЕРЕЗ WEBAPP ==========
+Rel(webApp, db, "Читает вакансии, результаты матчинга для отображения", "SQL")
+
+' ========== ПОЯСНЕНИЯ ==========
+note right of auth
+  Учётные записи сотрудников
+  ограничены по времени (2 месяца).
+  Роли: employee, consultant, admin.
+end note
+
+note right of webApp
+  Размещено в DMZ / облаке.
+  Доступно из интернета.
+  Внутри – разделы для разных ролей.
+end note
+
+note right of grading
+  Встроенный шедулер (APScheduler).
+  Расписание настраивается администратором
+  через Admin UI (вкладка в WebApp).
+end note
+
+note right of dict
+  Кэширует справочники в памяти.
+  Предоставляет API:
+  - /competencies (список)
+  - /categories (группы)
+  - /lookup?name=... (поиск competency_id по синониму)
+end note
+
+@enduml

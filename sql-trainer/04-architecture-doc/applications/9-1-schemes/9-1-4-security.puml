@@ -1,0 +1,82 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Security View – SQL Trainer (Conceptual, MVP)
+
+' ==== Пользователи и ИБ ====
+Person(learner, "Обучающийся / Методист / Администратор", "Сотрудник компании, работающий с SQL Trainer через корпоративный браузер.")
+Person(security_admin, "Security / IB", "Может запрашивать логи и участвовать в ревью модели безопасности.")
+
+' ==== Внешние системы идентификации ====
+System_Ext(keycloak, "SSO / Keycloak", "OIDC/OAuth2", "Центральная система аутентификации, интегрирована с AD.")
+System_Ext(ad, "Active Directory", "LDAP/LDAPS", "Корпоративный каталог учётных записей и групп.")
+
+' ==== Корпоративный контур ====
+System_Boundary(corp_net, "Корпоративная сеть / VPN") {
+
+  ' --- Периметр приложения ---
+  Container(nginx, "Nginx + Static UI", "Nginx, React SPA",    "Периметр SQL Trainer\n---\n• Терминация TLS (HTTPS)\n• Раздача статического UI\n• Маршрутизация API-запросов к backend\n• Проверка JWT-токенов по данным Keycloak")
+
+  ' --- Кластер приложений (backend) ---
+  System_Boundary(app_tier, "App Tier – Kubernetes Cluster") {
+
+    Container(app_services, "App Services", "Java, Spring Boot",      "Backend-сервисы SQL Trainer\n---\n• Users/Auth, Courses/Tasks, Progress/Reporting\n• Бизнес-логика тренажёра\n• Авторизация по ролям на основе токена\n• Нет прямого доступа из пользовательской сети")
+
+    Container(exec_svc, "Execution Service", "Java, Spring Boot",      "Подсистема выполнения SQL-запросов\n---\n• Принимает учебные SQL-запросы\n• Выполняет их над Training DB\n• Возвращает результат и вердикт в App Services")
+  }
+
+  ' --- Слой данных ---
+  System_Boundary(data_tier, "Data Tier – Внутренние БД") {
+
+    ContainerDb(app_db, "App DB", "PostgreSQL",      "Сервисные данные приложения\n---\n• Курсы, задачи, пользователи\n• История попыток\n• Прогресс и отчётность")
+
+    ContainerDb(training_db, "Training DB", "PostgreSQL",      "Учебные данные\n---\n• Учебные схемы и таблицы\n• Только синтетические/обезличенные данные\n• Используется только для выполнения учебных SQL-запросов")
+  }
+}
+
+' ==== Связи пользователей и периметра ====
+Rel(learner, nginx, "HTTPS через корпоративную сеть/VPN", "TLS 1.2+")
+
+' ==== Связи внутри корпоративного контура ====
+Rel(nginx, app_services, "REST API-запросы / проксирование", "HTTP(S) внутренняя сеть")
+Rel(nginx, exec_svc, "REST API-запросы\nна выполнение SQL", "HTTP(S) внутренняя сеть")
+
+Rel_R(app_services, app_db, "JDBC, только из кластера", "PostgreSQL 5432")
+Rel(exec_svc, training_db, "JDBC, только из кластера", "PostgreSQL 5432")
+
+' ==== Аутентификация и роли ====
+Rel_R(nginx, keycloak, "Проверка и валидация JWT (JWKS)", "HTTPS")
+'Rel(learner, keycloak, "Редирект для аутентификации", "HTTPS (OIDC)")
+Rel_R(keycloak, ad, "Проверка учётных данных и получение атрибутов", "LDAP/LDAPS")
+
+' ==== Пояснения по зонам безопасности ====
+UpdateElementStyle(nginx, $bgColor="lightgray")
+UpdateElementStyle(app_tier, $bgColor="whitesmoke")
+UpdateElementStyle(data_tier, $bgColor="whitesmoke")
+
+note top of corp_net
+  Security Zones (упрощённо):
+  • Пользовательская сеть / VPN – только HTTPS к Nginx
+  • Периметр приложения – Nginx + статика UI, проверка JWT
+  • App Tier (Kubernetes) – только внутренний трафик от Nginx
+  • Data Tier – только JDBC с адресов кластера
+  • Identity Zone (Keycloak/AD) – общекорпоративная
+end note
+
+note left of data_tier
+  Ограничения доступа к данным:
+  • Нет прямого сетевого доступа к App DB и Training DB
+    из пользовательской сети и других приложений.
+  • Доступ только с адресов backend-кластера
+    по портам PostgreSQL (5432).
+  • Training DB не содержит боевых клиентских данных.
+end note
+
+note right of keycloak
+  Модель аутентификации:
+  • Единственный источник аутентификации – Keycloak (SSO)
+  • Пароли и MFA управляются корпоративной ИБ
+  • SQL Trainer не хранит пароли пользователей
+end note
+
+@enduml

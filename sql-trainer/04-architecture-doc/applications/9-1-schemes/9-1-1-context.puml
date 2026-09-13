@@ -1,0 +1,24 @@
+@startuml
+
+!include https://raw.githubusercontent.com/vasilokb/plantUML/refs/heads/main/C4.puml
+
+title System Context – SQL Trainer
+
+Person(learner, "Обучающийся", "Сотрудник, который проходит курсы и решает задачи по SQL.")
+Person(methodist, "Методист / Руководитель", "Создаёт и сопровождает учебный контент, анализирует прогресс.")
+Person(admin, "Администратор", "Управляет задачами и учебными данными, выполняет технические операции.")
+
+System(browser, "Веб-браузер", "Технический клиент, через который сотрудники работают с тренажёром.")
+System(sqltrainer, "SQL Trainer", "Внутренний корпоративный SQL-тренажёр для обучения и практики сотрудников.")
+System_Ext(keycloak, "SSO / Keycloak", "Корпоративная система единого входа и авторизации.")
+System_Ext(ad, "Active Directory", "Корпоративный каталог пользователей и групп.")
+
+Rel(learner, browser, "Работает через")
+Rel(methodist, browser, "Работает через")
+Rel(admin, browser, "Работает через")
+
+Rel(browser, sqltrainer, "HTTP(S) запросы к веб-интерфейсу и API")
+Rel(sqltrainer, keycloak, "Запрос аутентификации и получения токенов")
+Rel(keycloak, ad, "Проверка учётных данных и получение атрибутов пользователя")
+
+@enduml

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Career Planner — макет UI</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f0f2f5; color: #1a1a2e; }
+
+  .header { background: #1a1a2e; color: #fff; padding: 14px 24px; position: sticky; top: 0; z-index: 100; }
+  .header h1 { font-size: 19px; }
+  .header .sub { font-size: 13px; color: #aaa; margin-top: 2px; }
+
+  .layout { display: flex; gap: 16px; max-width: 1200px; margin: 0 auto; padding: 16px; align-items: flex-start; }
+  .col-results { flex: 1 1 65%; min-width: 0; order: 2; }
+  .col-skills { flex: 0 0 320px; position: sticky; top: 72px; order: 1; }
+
+  /* ===== ЛЕВАЯ КОЛОНКА: ВАКАНСИИ ===== */
+  .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .results-count { font-size: 15px; color: #555; }
+  .results-count b { font-size: 20px; color: #1a1a2e; }
+  .updated-info { font-size: 12px; color: #999; margin-bottom: 16px; }
+
+  .vacancy-card { background: #fff; border-radius: 10px; padding: 16px 18px; margin-bottom: 12px; border: 1px solid #e8e8e8; transition: box-shadow 0.15s; }
+  .vacancy-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.07); }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .card-title { font-size: 16px; font-weight: 600; line-height: 1.3; }
+  .card-company { font-size: 13px; color: #777; margin-top: 2px; }
+  .match-badge { font-size: 22px; font-weight: 800; padding: 3px 10px; border-radius: 8px; white-space: nowrap; flex-shrink: 0; }
+  .match-high { background: #e6f9ed; color: #1a7a3a; }
+  .match-mid  { background: #fff8e6; color: #8a6a00; }
+  .match-low  { background: #fce8e8; color: #a02828; }
+  .card-meta { display: flex; gap: 14px; font-size: 12px; color: #888; margin: 8px 0 0; }
+  .card-meta span { display: flex; align-items: center; gap: 3px; }
+  .card-skills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .skill-match { font-size: 11px; padding: 3px 8px; border-radius: 4px; background: #e6f9ed; color: #1a7a3a; }
+  .skill-miss  { font-size: 11px; padding: 3px 8px; border-radius: 4px; background: #fce8e8; color: #a02828; }
+  .skills-label { font-size: 11px; color: #aaa; margin: 6px 0 0; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ===== ПРАВАЯ КОЛОНКА: НАВЫКИ ===== */
+  .skills-panel { background: #fff; border-radius: 10px; border: 1px solid #e8e8e8; overflow: hidden; }
+  .skills-panel-head { padding: 14px 16px; border-bottom: 1px solid #eee; }
+  .skills-panel-head h2 { font-size: 15px; margin-bottom: 4px; }
+  .skills-panel-head p { font-size: 12px; color: #999; }
+  .search-box { width: 100%; padding: 9px 12px; font-size: 14px; border: 2px solid #e0e0e0; border-radius: 8px; margin: 10px 0 0; outline: none; }
+  .search-box:focus { border-color: #4a6cf7; }
+  .skills-scroll { max-height: calc(100vh - 260px); overflow-y: auto; padding: 8px 12px 8px; }
+  .skill-group { margin-bottom: 14px; }
+  .skill-group-title { font-size: 12px; font-weight: 600; color: #777; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #f0f0f0; text-transform: uppercase; letter-spacing: 0.5px; }
+  .skill-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .skill-tag { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border: 1.5px solid #ddd; border-radius: 16px; font-size: 13px; cursor: pointer; transition: all 0.12s; background: #fff; }
+  .skill-tag:hover { border-color: #4a6cf7; }
+  .skill-tag.checked { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+  .skill-tag .check { font-size: 11px; }
+  .skills-footer { padding: 12px 16px; border-top: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+  .selected-count { font-size: 13px; color: #666; }
+  .selected-count b { color: #1a1a2e; font-size: 15px; }
+  .btn-primary { background: #4a6cf7; color: #fff; border: none; padding: 9px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn-primary:hover { background: #3a5ce5; }
+
+  @media (max-width: 760px) {
+    .layout { flex-direction: column; }
+    .col-skills { position: static; flex: 1 1 auto; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Career Planner</h1>
+  <div class="sub">Подбор позиций по вашим компетенциям</div>
+</div>
+
+<div class="layout">
+
+  <!-- ===== ПРАВАЯ КОЛОНКА: ВАКАНСИИ (широкая) ===== -->
+  <div class="col-results">
+
+    <div class="results-header">
+      <div class="results-count">Найдено вакансий: <b>47</b></div>
+    </div>
+    <div class="updated-info">Данные обновлены сегодня в 06:00. Сортировка: от наиболее релевантных.</div>
+
+    <div class="vacancy-card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">Backend Python-разработчик</div>
+          <div class="card-company">Т-Банк — Москва, удалёнка</div>
+        </div>
+        <div class="match-badge match-high">94%</div>
+      </div>
+      <div class="card-meta">
+        <span>350 000 — 450 000 ₽</span>
+        <span>Опыт 3-6 лет</span>
+        <span>Полный день</span>
+      </div>
+      <div class="card-skills">
+        <span class="skill-match">Python</span>
+        <span class="skill-match">PostgreSQL</span>
+        <span class="skill-match">FastAPI</span>
+        <span class="skill-match">Docker</span>
+        <span class="skill-match">Redis</span>
+        <span class="skill-miss">Kafka</span>
+      </div>
+    </div>
+
+    <div class="vacancy-card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">Senior Data Engineer</div>
+          <div class="card-company">Авито — Москва, гибрид</div>
+        </div>
+        <div class="match-badge match-high">87%</div>
+      </div>
+      <div class="card-meta">
+        <span>300 000 — 400 000 ₽</span>
+        <span>Опыт 3-6 лет</span>
+        <span>Полный день</span>
+      </div>
+      <div class="card-skills">
+        <span class="skill-match">Python</span>
+        <span class="skill-match">SQL</span>
+        <span class="skill-match">PostgreSQL</span>
+        <span class="skill-match">Airflow</span>
+        <span class="skill-match">Docker</span>
+        <span class="skill-miss">Spark</span>
+        <span class="skill-miss">ClickHouse</span>
+      </div>
+    </div>
+
+    <div class="vacancy-card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">Python Developer (Backend)</div>
+          <div class="card-company">Яндекс — Москва</div>
+        </div>
+        <div class="match-badge match-mid">72%</div>
+      </div>
+      <div class="card-meta">
+        <span>250 000 — 350 000 ₽</span>
+        <span>Опыт 1-3 года</span>
+        <span>Полный день</span>
+      </div>
+      <div class="card-skills">
+        <span class="skill-match">Python</span>
+        <span class="skill-match">SQL</span>
+        <span class="skill-match">PostgreSQL</span>
+        <span class="skill-match">Docker</span>
+        <span class="skill-miss">Java</span>
+        <span class="skill-miss">Kubernetes</span>
+      </div>
+    </div>
+
+    <div class="vacancy-card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">Fullstack разработчик</div>
+          <div class="card-company">Ozon — Санкт-Петербург, удалёнка</div>
+        </div>
+        <div class="match-badge match-mid">58%</div>
+      </div>
+      <div class="card-meta">
+        <span>200 000 — 300 000 ₽</span>
+        <span>Опыт 3-6 лет</span>
+        <span>Полный день</span>
+      </div>
+      <div class="card-skills">
+        <span class="skill-match">Python</span>
+        <span class="skill-match">Docker</span>
+        <span class="skill-match">PostgreSQL</span>
+        <span class="skill-miss">React</span>
+        <span class="skill-miss">TypeScript</span>
+        <span class="skill-miss">Kubernetes</span>
+      </div>
+    </div>
+
+    <div class="vacancy-card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">DevOps инженер</div>
+          <div class="card-company">Сбер — Москва, гибрид</div>
+        </div>
+        <div class="match-badge match-low">31%</div>
+      </div>
+      <div class="card-meta">
+        <span>280 000 — 380 000 ₽</span>
+        <span>Опыт 3-6 лет</span>
+        <span>Полный день</span>
+      </div>
+      <div class="card-skills">
+        <span class="skill-match">Docker</span>
+        <span class="skill-match">Linux</span>
+        <span class="skill-miss">Ansible</span>
+        <span class="skill-miss">Terraform</span>
+        <span class="skill-miss">Kubernetes</span>
+        <span class="skill-miss">Prometheus</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===== ЛЕВАЯ КОЛОНКА: ВЫБОР НАВЫКОВ (узкая) ===== -->
+  <div class="col-skills">
+    <div class="skills-panel">
+
+      <div class="skills-panel-head">
+        <h2>Ваши навыки</h2>
+        <p>Список навыков берётся из HeadHunter</p>
+        <input type="text" class="search-box" placeholder="Поиск навыка...">
+      </div>
+
+      <div class="skills-scroll">
+
+        <div class="skill-group">
+          <div class="skill-group-title">Языки программирования</div>
+          <div class="skill-tags">
+            <span class="skill-tag checked">Python <span class="check">✓</span></span>
+            <span class="skill-tag checked">SQL <span class="check">✓</span></span>
+            <span class="skill-tag">Java</span>
+            <span class="skill-tag">C#</span>
+            <span class="skill-tag">JavaScript</span>
+            <span class="skill-tag">Go</span>
+            <span class="skill-tag">TypeScript</span>
+            <span class="skill-tag">Kotlin</span>
+            <span class="skill-tag">PHP</span>
+            <span class="skill-tag">C++</span>
+          </div>
+        </div>
+
+        <div class="skill-group">
+          <div class="skill-group-title">Базы данных</div>
+          <div class="skill-tags">
+            <span class="skill-tag checked">PostgreSQL <span class="check">✓</span></span>
+            <span class="skill-tag checked">Redis <span class="check">✓</span></span>
+            <span class="skill-tag">MySQL</span>
+            <span class="skill-tag">MongoDB</span>
+            <span class="skill-tag">ClickHouse</span>
+            <span class="skill-tag">Oracle</span>
+          </div>
+        </div>
+
+        <div class="skill-group">
+          <div class="skill-group-title">Фреймворки</div>
+          <div class="skill-tags">
+            <span class="skill-tag checked">FastAPI <span class="check">✓</span></span>
+            <span class="skill-tag checked">Docker <span class="check">✓</span></span>
+            <span class="skill-tag">Django</span>
+            <span class="skill-tag">Flask</span>
+            <span class="skill-tag">Kubernetes</span>
+            <span class="skill-tag">Kafka</span>
+            <span class="skill-tag">Airflow</span>
+            <span class="skill-tag">Spark</span>
+          </div>
+        </div>
+
+        <div class="skill-group">
+          <div class="skill-group-title">Прочее</div>
+          <div class="skill-tags">
+            <span class="skill-tag">REST API</span>
+            <span class="skill-tag">GraphQL</span>
+            <span class="skill-tag">Microservices</span>
+            <span class="skill-tag">CI/CD</span>
+            <span class="skill-tag">Linux</span>
+            <span class="skill-tag">Agile</span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="skills-footer">
+        <div class="selected-count">Выбрано: <b>6</b></div>
+        <button class="btn-primary">Подобрать</button>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

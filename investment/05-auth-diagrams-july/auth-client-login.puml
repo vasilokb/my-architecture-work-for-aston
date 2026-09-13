@@ -1,0 +1,98 @@
+@startuml
+title Вход инвестора — OAuth 2.0 через Keycloak (Password Grant)\n + участие customer-service (регистрация, OTP/2FA, refresh)\n\nПо данным AQA-тестов и SPA (token issuer = realm test-BE)
+
+skinparam maxMessageSize 240
+skinparam sequenceMessageAlign center
+skinparam backgroundColor transparent
+skinparam responseMessageBelowArrow true
+
+actor Инвестор as U
+participant "React SPA" as SPA
+database "Keycloak\n:30803, realm test-BE\nclient token_client" as KC
+participant "API Gateway\n(JwtFilter)" as GW
+participant "customer-service" as CS
+participant "notification-service" as NOTIF
+participant "downstream\n(account/catalog/...)" as DS
+
+== РЕГИСТРАЦИЯ (через customer-service, без токена) ==
+
+U -> SPA : данные регистрации
+SPA -> GW : POST /api/v1/customer-service/registration
+GW -> CS : permitAll
+CS -> CS : BCrypt(password) + сохранение Customer\n+ CustomerSecurityInfo (флаги 2FA)
+CS -> NOTIF : Kafka: отправка OTP (подтверждение)
+NOTIF -> U : 📩 код подтверждения
+SPA -> GW : POST /otp/verify {operation_id, code}
+CS -> CS : customer.isApproved = true
+CS --> SPA : аккаунт подтверждён
+
+== ЛОГИН — OAuth 2.0 Password Grant (основной поток) ==
+
+U -> SPA : email + password
+note right of SPA #F4B400
+  SPA (и AQA AuthService) идут напрямую в Keycloak
+  по Password Grant. Исходники SPA не выкачаны локально,
+  но AQA подтверждает: KeyCloakServiceRequests.userAuthentification
+  → grant_type=password, client_id=token_client.
+end note
+SPA -> KC : POST /auth/realms/test-BE/protocol/openid-connect/token\n{grant_type=password, client_id=token_client,\n username=email, password, client_secret}
+KC -> KC : проверка учётки (из user-store),\nвыпуск JWT
+KC --> SPA : 200 {access_token, refresh_token, expires_in, scope=profile}
+note right of KC
+  <b>JWT (issuer = Keycloak realm):</b>
+   iss = http://172.17.1.26:30803/auth/realms/test-BE
+   sub = customerId, scope содержит "profile"
+   access TTL ≈ 5м, refresh ≈ 30м (Keycloak default)
+end note
+SPA -> SPA : localStorage['access_token'] = access_token\nrefresh_token → HttpOnly-cookie
+
+alt 2FA включён (email/phone) — опционально
+  SPA -> GW : POST /otp {type=auth}  (Bearer)
+  CS -> NOTIF : отправка OTP
+  NOTIF -> U : 📩 второй фактор
+  SPA -> GW : POST /otp/verify {code}
+  CS --> SPA : подтверждено
+end
+
+== ЗАЩИЩЁННЫЙ ЗАПРОС (Bearer → downstream) ==
+
+U -> SPA : открыть портфель
+SPA -> GW : GET /account-service/...  Authorization: Bearer {keycloak access}
+note right of GW
+  JwtFilter валидирует Keycloak-токен
+  (Token Introspection / проверка подписи realm),
+  извлекает customerId (sub),
+  добавляет заголовок customer_id → downstream.
+end note
+GW -> DS : прокси + customer_id
+DS --> SPA : данные
+
+== REFRESH access-токена (через customer-service) ==
+
+U -> SPA : действие (access истёк)
+SPA -> GW : POST /api/v1/customer-service/refresh-token\nCookie: refresh_token=...
+GW -> CS : permitAll
+note right of CS
+  customer-service /refresh-token работает с Keycloak:
+  по RefreshValidator ответ содержит access_token,
+  чей issuer = Keycloak realm, scope=profile,
+  и выставляет HttpOnly cookie refresh_token
+  (path=/, SameSite).
+end note
+CS -> KC : обмен refresh_token (realm test-BE)
+KC --> CS : новый access_token (+ refresh)
+CS --> SPA : {access_token, expires_in} + Set-Cookie refresh_token
+SPA -> SPA : обновить localStorage['access_token']
+
+note over U, DS #F4B400
+  <b>Важно (AS-IS):</b>
+   • Keycloak — РЕАЛЬНЫЙ IdP клиентов (подтверждено AQA: BaseUrls.KEY_CLOAK=:30803,
+     AuthService→KeyCloakServiceRequests, RefreshValidator проверяет issuer=Keycloak).
+   • В customer-service ОСТАЛАСЬ legacy-логика собственного HS256-JWT
+     (JwtProvider/JwtFilter/BCrypt, эндпоинт /auth). Она частично вытеснена
+     миграцией на Keycloak и сосуществует с ним.
+   • Исходники SPA и api-gateway не выкачаны локально — поток восстановлен по
+     AQA-тестам (источник истины для «как реально работает»).
+end note
+
+@enduml

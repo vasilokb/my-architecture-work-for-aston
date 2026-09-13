@@ -1,0 +1,36 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Контекстная диаграмма - Проект Liberty Investment (Инвестиционное приложение)
+
+' === ЛЮДИ ===
+Person(клиент_инвестор, "Клиент (Инвестор)", "Физическое лицо, использующее инвестиционное приложение")
+Person(сотрудник_банка, "Сотрудник банка", "Администратор, трейдер, операционист банка")
+Person(девопс, "DevOps / Инженер", "Обслуживание и поддержка системы")
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(moex, "Московская биржа (MOEX)", "Источник рыночных данных и котировок ценных бумаг") 
+System_Ext(keycloak_idp, "Keycloak (IdP)", "Система идентификации и аутентификации (Identity Provider)")
+System_Ext(mail_server, "Почтовый сервер", "Для отправки email-уведомлений клиентам")
+
+' === НАША СИСТЕМА (ЯДРО) ===
+System(liberty_investment, "Liberty Investment (Инвестиционное приложение)", "Микросервисная архитектура инвестиционного приложения: фронтенд, API Gateway, микросервисы для трейдинга, каталога инструментов, клиентов, документов, эмулятор биржи, уведомлений")
+
+' === ПРОИЗВОДНЫЕ СИСТЕМЫ (Надстройки/Интеграции) ===
+System_Ext(digital_bank, "Цифровой банк (ДБО)", "Банковский портал/мобильное приложение, использующее Liberty Investment как инвестиционный модуль")
+
+' === СВЯЗИ ===
+' Люди → Система
+Rel(клиент_инвестор, liberty_investment, "Использует мобильное/веб-приложение для инвестирования", "HTTPS")
+Rel(сотрудник_банка, liberty_investment, "Использует внутренний интерфейс для управления", "HTTPS")
+Rel(девопс, liberty_investment, "Развертывание, мониторинг, обслуживание", "HTTPS/SSH")
+
+' Liberty Investment → Внешние системы
+Rel(liberty_investment, moex, "Получение котировок и рыночных данных", "HTTP/Feign")
+Rel(liberty_investment, keycloak_idp, "Аутентификация и авторизация", "OAuth2/OpenID")
+Rel(liberty_investment, mail_server, "Отправка email уведомлений", "SMTP/HTTP")
+
+' Внешние системы (клиенты) → Liberty Investment
+Rel(digital_bank, liberty_investment, "Интеграция инвестиционного модуля в банк", "REST API")
+
+@enduml

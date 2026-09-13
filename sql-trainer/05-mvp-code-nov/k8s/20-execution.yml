@@ -1,0 +1,47 @@
+#отмена!!!
+apiVersion: v1
+kind: Service
+metadata:
+  name: execution
+  namespace: sql-trainer
+spec:
+  type: ClusterIP
+  selector:
+    app: execution
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution
+  namespace: sql-trainer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: execution
+  template:
+    metadata:
+      labels:
+        app: execution
+    spec:
+      containers:
+        - name: pgweb
+          image: sosedoff/pgweb:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # сюда подставляем твои креды read-only
+            - name: DATABASE_URL
+              value: postgres://trainero:change_me_ro_pass@training-postgres.sql-trainer.svc.cluster.local:5432/training?sslmode=disable
+          ports:
+            - containerPort: 8081
+          # чтобы не падал при старте БД
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5

@@ -1,0 +1,178 @@
+﻿@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма — Архитектура административной части (черновик, по модулям)
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 30
+skinparam ranksep 18
+skinparam backgroundColor transparent
+skinparam defaultTextAlignment center
+skinparam ArrowColor #666666
+skinparam ContainerFontSize 11
+skinparam ContainerFontStyle bold
+skinparam BoundaryFontSize 12
+
+' ЛЕГЕНДА ЦВЕТОВ (по требованиям, а не по физическому расположению):
+'   #5B9BD5  = клиентская часть (то, что делает клиент)
+'   #70AD47  = административная часть (то, что делает менеджер)
+'   #3CB371  = общий сервис (используется обеими частями)
+'   #F4B400  = физическое расположение не соответствует требованиям (долг)
+
+' === ЛЮДИ ===
+Person(клиент, "Клиент (Инвестор)", "Делает сам: торговля, портфель, заявки, свои данные")
+Person(менеджер, "Менеджер компании", "Работает с клиентом: ведение, саппорт, HR, контент")
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(moex, "MOEX", "Котировки, рыночные данные")
+System_Ext(keycloak, "Keycloak (IdP)", "Аутентификация клиентов")
+System_Ext(mail_server, "Почтовый сервер", "Email")
+
+' === ТОЧКА ВХОДА (общая) ===
+System_Boundary(liberty, "Liberty Investment") {
+
+    Boundary(infra, "Инфраструктура (общая)") {
+        Container(api_gw, "API Gateway", "Spring Cloud Gateway WebFlux", "Единая точка входа. JwtFilter (клиенты) + AuthJwtFilter (менеджеры), Circuit Breaker, CORS") #3CB371
+    }
+
+    ' ============================================================
+    ' КЛИЕНТСКАЯ ЧАСТЬ — ядро учёта (аналог АБС)
+    ' ============================================================
+    Boundary(client_part, "КЛИЕНТСКАЯ ЧАСТЬ (ядро учёта)") {
+        Container(react_app, "React SPA", "React 18, Vite, RTK Query", "Клиентское инвестиционное приложение") #5B9BD5
+        Container(account_svc, "account-service", "Spring Boot 3.5.0", "Брокерские/депо/маржинальные счета, активы, история операций") #5B9BD5
+        Container(catalog_svc, "catalog-service", "Spring Boot 3.5.0", "Каталог инструментов, котировки, портфели, избранное") #5B9BD5
+        Container(customer_svc, "customer-service", "Spring Boot 3.5.0", "Профиль клиента, рефералы + auth/registration/2FA\n⚠ смешивает профиль и безопасность — долг") #F4B400
+        Container(document_svc, "document-service", "Spring Boot 3.5.0", "PDF-документы, 2-НДФЛ, скачивание") #5B9BD5
+        Container(emulator_svc, "emulator-service", "Kotlin + Spring Boot", "Эмулятор биржи, обработка ордеров, котировки MOEX") #5B9BD5
+        Container(notification_svc, "notification-service", "Spring Boot 3.5.0", "Push/SSE/Email уведомления") #5B9BD5
+        Container(otp_svc, "otp-service", "Spring Boot 3.5.0", "OTP-коды, верификация операций (security-функция)") #5B9BD5
+        Container(trading_svc, "trading-service", "Spring Boot 3.5.0", "Ордера, портфели, комиссии, Outbox\n⚠ физически в backend/, по требованиям — клиентский") #F4B400
+    }
+
+    ' ============================================================
+    ' административная часть — модули по бизнес-направлениям
+    ' ============================================================
+    Boundary(admin_part, "административная часть (модули для менеджеров)") {
+
+        Boundary(mod_crm, "Модуль: CRM / Клиенты") {
+            Container(userinfo_svc, "userinfo-service", "Spring Boot 3.5.0", "Back-office по клиентам: просмотр/редактирование, история торгов, счета, экспорт PDF\n⚠ содержит чужую доменную логику (KYC, аудит) — кандидат на рефакторинг") #70AD47
+        }
+
+        Boundary(mod_comm, "Модуль: Коммуникации") {
+            Container(chat_svc, "chat-service (планируется)", "Spring Boot", "Чат клиента с личным менеджером\n⚠ кандидат на вынос в ОБЩИЙ сервис") #F4B400
+        }
+
+        Boundary(mod_support, "Модуль: Поддержка") {
+            Container(support_svc, "support-service", "Spring Boot 3.5.6", "Тикеты поддержки, шаблоны ответов\n⚠ создание заявок закомментировано") #70AD47
+        }
+
+        Boundary(mod_hr, "Модуль: HR / Сотрудники") {
+            Container(employee_svc, "employee-service", "Spring Boot 3.5.0", "Сотрудники, рабочие места, задачи, аудит\n⚠ содержит тикеты поддержки (чужой домен)") #70AD47
+        }
+
+        Boundary(mod_security, "Модуль: Безопасность") {
+            Container(auth_svc, "auth-service", "Spring Boot 3.5.5", "Аутентификация менеджеров (JWT, OTP 2FA), роли, права, refresh, logout") #70AD47
+        }
+
+        Boundary(mod_education, "Модуль: Образование (админ-контент)") {
+            Container(education_svc, "education-service", "Spring Boot 3.5.0", "Каталог курсов (read-side для клиента + write-side для админа)") #70AD47
+            Container(test_svc, "test-service", "Spring Boot 3.5.0", "Квалификационные тесты: получение, проверка ответов") #70AD47
+            Container(mgmt_edu, "management-service-pb (образование)", "Spring Boot 3.5.0", "CRUD курсов, тем, уроков, категорий, тесты\n⚠ смешан с портфелями — кандидат на разделение") #70AD47
+        }
+
+        Boundary(mod_portfolio, "Модуль: Управление портфелями (админ)") {
+            Container(mgmt_pf, "management-service-pb (портфели)", "Spring Boot 3.5.0", "Готовые портфели: CRUD, комиссии, тейк-профит, торговые статусы\n⚠ смешан с образованием — кандидат на разделение") #70AD47
+        }
+
+        Boundary(mod_finance, "Модуль: Финансовая аналитика") {
+            Container(financial_svc, "financialtransactions-service", "Spring Boot 3.5.0", "История транзакций клиента, отчёт по операциям\n⚠ старый сервис, статус уточняется") #F4B400
+            Container(tax_svc, "tax-service", "Spring Boot 3.5.0", "Расчёт НДФЛ (batch), 2-НДФЛ\n⚠ граница клиент/админ не определена") #F4B400
+        }
+
+        Boundary(mod_tariff, "Модуль: Тарифы / Услуги") {
+            Container(customercare_svc, "customercare-service", "Spring Boot 3.5.0", "Подключение платных услуг (SUBSCRIPTION/FREE/FIXED), договор\n⚠ статус спорный, вызывает клиентские сервисы") #F4B400
+        }
+    }
+}
+
+' =============================================
+' СВЯЗИ: ЛЮДИ → ТОЧКА ВХОДА
+' =============================================
+Rel(клиент, react_app, "HTTPS", "Клиентское приложение")
+Rel(менеджер, api_gw, "HTTPS", "Внутренний интерфейс (AuthJwtFilter)")
+
+' =============================================
+' ТОЧКА ВХОДА → ФРОНТЕНДЫ
+' =============================================
+Rel(react_app, api_gw, "REST API + SSE", "HTTPS")
+
+' =============================================
+' API GATEWAY → КЛИЕНТСКАЯ ЧАСТЬ
+' =============================================
+Rel(api_gw, account_svc, "", "REST")
+Rel(api_gw, catalog_svc, "", "REST")
+Rel(api_gw, customer_svc, "", "REST")
+Rel(api_gw, document_svc, "", "REST")
+Rel(api_gw, emulator_svc, "", "REST")
+Rel(api_gw, notification_svc, "", "REST")
+Rel(api_gw, otp_svc, "", "REST")
+Rel(api_gw, trading_svc, "", "REST")
+
+' =============================================
+' API GATEWAY → административная часть (по модулям)
+' =============================================
+Rel(api_gw, userinfo_svc, "", "REST")
+Rel(api_gw, support_svc, "", "REST")
+Rel(api_gw, employee_svc, "", "REST")
+Rel(api_gw, auth_svc, "", "REST")
+Rel(api_gw, education_svc, "", "REST")
+Rel(api_gw, test_svc, "", "REST")
+Rel(api_gw, mgmt_edu, "", "REST")
+Rel(api_gw, mgmt_pf, "", "REST")
+Rel(api_gw, financial_svc, "", "REST")
+Rel(api_gw, tax_svc, "", "REST")
+Rel(api_gw, customercare_svc, "", "REST")
+
+' =============================================
+' ВНЕШНИЕ СИСТЕМЫ
+' =============================================
+Rel(api_gw, keycloak, "Token introspection", "HTTPS")
+Rel(emulator_svc, moex, "Котировки", "HTTPS/Feign")
+Rel(notification_svc, mail_server, "Email", "SMTP")
+
+' =============================================
+' АДМИНКА → КЛИЕНТСКАЯ ЧАСТЬ (агрегация данных в BFF/модулях)
+' =============================================
+Rel(userinfo_svc, customer_svc, "getCustomerInfo, blockClient", "Feign")
+Rel(userinfo_svc, account_svc, "getAccounts, getTradeHistory", "Feign/Kafka")
+Rel(userinfo_svc, trading_svc, "getOrders", "Feign/Kafka")
+Rel(mgmt_pf, catalog_svc, "changePortfolio, getAllPortfolios", "Feign")
+Rel(mgmt_pf, financial_svc, "getTransactionsByCustomerId", "Feign")
+Rel(financial_svc, account_svc, "getTransactions", "Feign")
+Rel(tax_svc, account_svc, "taxWithdraw", "Feign")
+Rel(customercare_svc, customer_svc, "getCustomer", "Feign")
+Rel(customercare_svc, account_svc, "getBrokerAccounts", "Feign")
+Rel(customercare_svc, document_svc, "generateDocument", "Feign")
+
+' =============================================
+' KAFKA: РЕГИСТРАЦИЯ МЕНЕДЖЕРА (auth → employee → userinfo)
+' =============================================
+Rel(auth_svc, employee_svc, "register-account", "Kafka")
+Rel(employee_svc, userinfo_svc, "register-result", "Kafka")
+
+' =============================================
+' ОБЩИЙ СЕРВИС ЧАТ (кандидат) — обе части
+' =============================================
+Rel(react_app, chat_svc, "WebSocket", "Чат клиента с менеджером")
+Rel(userinfo_svc, chat_svc, "WebSocket", "Чат менеджера с клиентом")
+
+legend right
+  |= Цвет |= Принадлежность по требованиям |
+  |<back:#5B9BD5>   </back>| Клиентская часть (ядро учёта) |
+  |<back:#70AD47>   </back>| административная часть (модуль для менеджеров) |
+  |<back:#3CB371>   </back>| Общий сервис (обе части) |
+  |<back:#F4B400>   </back>| Несоответствие факт↔требования (долг) |
+endlegend
+
+@enduml

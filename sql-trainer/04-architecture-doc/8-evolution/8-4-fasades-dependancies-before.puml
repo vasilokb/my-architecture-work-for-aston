@@ -1,0 +1,35 @@
+@startuml
+title ДО фасада — прямые зависимости бизнес-кода от Keycloak/JWT
+
+package "backend/users-auth-service" {
+  class AuthController
+  class UserRoleService
+}
+
+package "backend/courses-tasks-service" {
+  class TaskController
+  class TaskService
+}
+
+package "backend/progress-reporting-service" {
+  class ProgressController
+  class ProgressService
+}
+
+package "внешний мир" {
+  class Keycloak
+}
+
+' ==== Users/Auth Service ====
+AuthController ..> Keycloak : достаёт\nJWT/роли из SecurityContext
+UserRoleService ..> Keycloak : тоже лезет\nв SecurityContext/JWT
+
+' ==== Courses/Tasks Service ====
+TaskController ..> Keycloak : использует\nJwt из SecurityContext\nдля проверки ролей
+TaskService ..> Keycloak : вытаскивает userId,\nroles из токена
+
+' ==== Progress/Reporting Service ====
+ProgressController ..> Keycloak : смотрит роли\nпрямо в JWT
+ProgressService ..> Keycloak : достаёт userId/roles\nчерез JWT
+
+@enduml

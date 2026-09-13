@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: prototype-vector-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=career
+      - POSTGRES_PASSWORD=career
+      - POSTGRES_DB=prototype
+    volumes:
+      - prototype_pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+
+volumes:
+  prototype_pgdata:

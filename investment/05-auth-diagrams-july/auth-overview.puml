@@ -1,0 +1,92 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Обзор аутентификации и авторизации (C4 L2) — Liberty Investment (AS-IS)
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 35
+skinparam ranksep 30
+skinparam backgroundColor transparent
+
+' ЛЕГЕНДА ЦВЕТОВ:
+'   #BDD7EE = IdP (Keycloak) — реальный провайдер клиентских токенов
+'   #5B9BD5 = клиентский поток (инвестор)
+'   #70AD47 = поток сотрудника (back-office)
+'   #F4B400 = legacy / сосуществует / скелет / риск
+
+' ===================== АКТОРЫ =====================
+Person(инвестор, "Инвестор", "Физическое лицо,\nклиент брокера")
+Person(сотрудник, "Сотрудник", "Оператор / аналитик /\nадминистратор back-office")
+
+' ===================== IdP =====================
+System_Ext(keycloak, "Keycloak :30803", "РЕАЛЬНЫЙ IdP клиентов\nrealm test-BE, client token_client\nOAuth 2.0 Password Grant\nissuer JWT = realm\n\n(подтв. AQA-тестами + SPA localStorage)") #BDD7EE
+
+' ===================== ФРОНТЕНДЫ =====================
+Container(react_spa, "React SPA", "React 18 + TS + Vite", "access_token → localStorage\nrefresh_token → HttpOnly-cookie\n⚠ исxодники не выкачаны локально") #5B9BD5
+Container(bo_portal, "Back-office портал", "Веб-портал сотрудника", "Внутренний UI\nчерез management-service-pb") #70AD47
+
+' ===================== API GATEWAY =====================
+Container_Boundary(gw, "API Gateway (:31531)  — Spring Cloud Gateway / WebFlux") {
+    Component(jwtfilt, "JwtFilter", "Gateway Global Filter", "КЛИЕНТЫ: 17 маршрутов\nВалидация Keycloak-JWT\n(Token Introspection / подпись realm)\nHeader downstream: customer_id\n⚠ .block() в реактивном коде") #BDD7EE
+    Component(authfilt, "AuthJwtFilter", "Gateway Global Filter", "СОТРУДНИКИ: 2 маршрута\n(/auth-service, /employee-service)\nHeader downstream: customer_id + x-role + x-permissions\n⚠ .block() в реактивном коде") #70AD47
+    Component(cb, "Circuit Breaker", "Resilience4j", "На каждом маршруте\nfallback → HTTP 503")
+}
+
+' ===================== КЛИЕНТСКИЕ СЕРВИСЫ =====================
+Container(cust_svc, "customer-service", "Spring Boot 3.5", "Участие в клиентском потоке:\nregistration, OTP/2FA,\n/refresh-token (обмен с Keycloak)\n+ legacy собственный HS256-JWT (/auth)") #5B9BD5
+Container(redis_c, "Redis (DB 6)", "Redis 7.2", "legacy: пары self-JWT\ntokens:{customerId};\notp rate-limit") #5B9BD5
+Container(pg_c, "PostgreSQL", "PG 14 — customer_service_db", "Customer, CustomerSecurityInfo,\nVerification (OTP), Passport") #5B9BD5
+Container(ds_client, "downstream клиентские\nсервисы", "account, catalog, document,\nemulator, notification, trading", "Принимают customer_id\nиз header Gateway") #5B9BD5
+
+' ===================== СЕРВИСЫ СОТРУДНИКА =====================
+Container(auth_svc, "auth-service", "Spring Boot 3.5", "Собственная JWT-авторизация сотрудника:\n2FA-логин, refresh, logout, RBAC\n(roles + permissions), аудит") #70AD47
+Container(pg_e, "PostgreSQL", "PG 14 — auth_db", "Employee, Credentials, Session,\nRole, Permission, EventCode, AuditLog") #70AD47
+Container(emp_svc, "employee-service", "Spring Boot", "Профиль сотрудника\n(второй маршрут под AuthJwtFilter)") #70AD47
+
+' ===================== KEYCLOAK-SERVICE (СКЕЛЕТ) =====================
+Container(keycloak_svc, "keycloak-service", "Kotlin, Spring Boot 4.0.6", "⚠ СКЕЛЕТ: объявлены\nkeycloak-admin-client:24.0.5,\nно НЕТ реализации.\nНе инвентаризирован в обзоре.\nВозможная будущая обёртка IdP.") #F4B400
+
+' ===================== УВЕДОМЛЕНИЯ (OTP) =====================
+Container(notif, "notification-service", "Spring Boot", "Доставка OTP-кодов и\nуведомлений (Push/SSE/Email)\nчерез Kafka") #FFFFFF
+
+' ===================== СВЯЗИ: КЛИЕНТСКИЙ ЛОГИН (KEYCLOAK) =====================
+Rel(инвестор, react_spa, "HTTPS", "Торгует, портфель")
+Rel(react_spa, keycloak, "Password Grant\nPOST /openid-connect/token", "OAuth 2.0")
+Rel(keycloak, react_spa, "access_token + refresh_token", "Keycloak JWT")
+
+' ===================== ЗАЩИЩЁННЫЕ ЗАПРОСЫ КЛИЕНТА =====================
+Rel(react_spa, jwtfilt, "REST Bearer {Keycloak access}", "/api/v1/...")
+Rel(jwtfilt, ds_client, "прокси + customer_id", "17 маршрутов")
+Rel(jwtfilt, cust_svc, "прокси + customer_id", "registration/otp/refresh")
+
+' ===================== REFRESH через customer-service =====================
+Rel(cust_svc, keycloak, "обмен refresh_token realm test-BE", "/refresh-token")
+Rel(cust_svc, redis_c, "legacy self-JWT store", "")
+Rel(cust_svc, pg_c, "JDBC", "Customer, Verification")
+
+' ===================== ПОТОК СОТРУДНИКА =====================
+Rel(сотрудник, bo_portal, "HTTPS", "Back-office")
+Rel(bo_portal, authfilt, "REST Bearer JWT", "Запросы")
+Rel(authfilt, auth_svc, "прокси + x-role/x-permissions", "2 маршрута")
+Rel(authfilt, emp_svc, "прокси", "employee-service")
+Rel(auth_svc, pg_e, "JDBC", "Auth-домен")
+Rel(auth_svc, notif, "Kafka: security-notification", "Отправка OTP")
+
+' ===================== СКЕЛЕТ =====================
+Rel_Back(keycloak_svc, keycloak, "будущая обёртка?\n(не подключён)", "—")
+
+' ===================== УВЕДОМЛЕНИЯ =====================
+Rel(notif, инвестор, "Push/SMS/Email", "OTP-код")
+Rel(notif, сотрудник, "Push/SMS/Email", "OTP-код")
+
+legend right
+  |= Цвет |= Значение |
+  |<back:#BDD7EE>   </back>| IdP (Keycloak) — реальный провайдер клиентских токенов |
+  |<back:#5B9BD5>   </back>| Клиентский поток (инвестор) |
+  |<back:#70AD47>   </back>| Поток сотрудника (back-office) |
+  |<back:#F4B400>   </back>| Legacy / сосуществует / скелет / риск |
+  |<back:#FFFFFF>   </back>| Вспомогательный сервис |
+endlegend
+
+@enduml

@@ -1,0 +1,47 @@
+_format_version: "3.0"
+
+# Декларативная конфигурация Kong (Kong OSS 3.x, database = off)
+# Маршрутизация: /v1/admin/* → admin-service, /api/* → backend-service
+
+services:
+  # Kong 3.x: routes без strip, контроллеры сами держат полный путь.
+  # /v1/admin/banks/{id} → upstream "/v1/admin/banks/{id}" — НЕ совпадает с BankController("/banks").
+  #   Решение: route "/v1/admin" strip_path:true → upstream "/banks/...".
+  # /api/v1/accounts     → upstream "/api/v1/accounts" — совпадает с AccountController("/api/v1/accounts").
+  - name: admin-service
+    url: http://admin-service:5001
+    routes:
+      - name: admin-route
+        paths:
+          - /v1/admin
+        strip_path: true
+
+  - name: backend-service
+    url: http://backend-service:5002
+    routes:
+      - name: backend-api-route
+        paths:
+          - /api/v1
+        strip_path: false
+
+plugins:
+  # Кастомный плагин blacklist-guard: проверяет blacklist:user:* и blacklist:tenant:* в Redis
+  # (конфигурируемых полей нет — fail-open захардкожен)
+  - name: blacklist-guard
+
+  # Audit: пишем auth-решения (allow/deny) в файл через file-log.
+  # custom_fields_by_lua опущен (песочница Kong не поддерживает `or` с пустой строкой)
+  - name: file-log
+    config:
+      path: /var/log/kong/audit.log
+      reopen: true
+
+# В сатиде НЕ используем JWT-плагин (упрощение). Тестовые curl идут с готовыми X-User-* заголовками,
+# как если бы Kong уже провалидировал JWT и извлёк claims. В проде добавить:
+#   - name: jwt
+#     config:
+#       key_claim_name: sub
+#       claims_to_headers:
+#         - sub: X-User-Id
+#         - tenant_id: X-Tenant-Id
+#         - realm_access.roles: X-User-Roles

@@ -1,0 +1,42 @@
+# Dockerfile для сервиса эмбеддингов Career Aggregator 2
+FROM python:3.11-slim
+
+# Устанавливаем системные зависимости для трансформеров
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Копируем зависимости
+COPY requirements.txt .
+
+# Устанавливаем Python зависимости
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Устанавливаем дополнительные зависимости для трансформеров
+RUN pip install --no-cache-dir \
+    sentence-transformers \
+    torch \
+    transformers
+
+# Копируем исходный код
+COPY app/services/embeddings/ ./app/services/embeddings/
+COPY app/core/ ./app/core/
+COPY .env.example .env
+
+# Создаем директорию для кэша моделей
+RUN mkdir -p /models_cache && chmod 777 /models_cache
+
+# Создаем пользователя для безопасности
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app /models_cache
+USER appuser
+
+# Экспортируем порт
+EXPOSE 8080
+
+# Команда запуска
+CMD ["python", "-m", "uvicorn", "app.services.embeddings.service:app", "--host", "0.0.0.0", "--port", "8080"]

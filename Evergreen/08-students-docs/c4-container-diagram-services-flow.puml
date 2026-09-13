@@ -1,0 +1,72 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title АБС-платформа — сервисы и последовательность вызовов (синхронный процесс + асинхронный канал)
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 90
+skinparam ranksep 45
+skinparam backgroundColor transparent
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(bank, "Банк-клиент (пилот — Эвергрин)", "Продуктовый слой банка.\nВедёт кредитный процесс: заявка → выдача")
+
+System_Boundary(abs, "АБС-платформа") {
+
+    Container(gw, "API Gateway", "Kong + OPA", "Проверка токена и прав,\nограничение нагрузки (3–5 запросов/сек на банк),\nопределение банка-отправителя")
+
+    Container(kc, "Keycloak", "Keycloak", "Аутентификация:\nвыпуск и проверка токенов")
+
+    Container(app, "credit-decision\n(сервис заявок)", "Java 21 — модульный монолит", "Шаг 2. Заявка → стоп-листы → скоринг → предложение\n(модули внутри одного сервиса)\nPOST /api/v1/applications")
+    Container(cli, "Client Service\n(сервис клиентов)", "Java 21", "Данные клиентов и их комплаенс-статусы")
+    Container(prod, "Product Catalog\n(кредитные продукты)", "Java 21", "Условия и параметры\nкредитных продуктов")
+    Container(acc, "Сервис счетов", "Java 21", "Шаг 3. Открытие счетов, операции\nPOST /api/v1/accounting/transactions")
+    Container(doc, "Сервис документов", "Java 21", "Шаг 4. Черновик кредитного договора")
+    Container(sign, "loan-signing\n(подписание)", "Java 21", "Шаг 5. POST /sign/initiate\nPOST /sign/confirm")
+
+    Container(adm, "Admin Service\n(администрирование)", "Java 21", "Регистрация банков и сотрудников,\nролевая модель, разрешения")
+    Container(notif, "Notification Service", "Java 21", "Уведомления о регистрации банков")
+
+    Container(facade, "Асинхронный фасад", "Java 21 + PostgreSQL + Kafka", "Приём операций (ответ «принято»),\nочередь задач и результатов, уведомление банка\nо завершении (вебхук).\nВнутреннее устройство — отдельная диаграмма")
+
+    Container(egw, "Egress Gateway (этап 2)", "Kong / Envoy", "Единая точка исходящих вызовов в банки:\nсертификаты и ключи подписи, аудит,\nскрытие внутренней топологии")
+}
+
+' === ПОДГОТОВКА ===
+Rel(bank, kc, "1. Аутентификация — банк получает токен", "HTTPS")
+
+' === СИНХРОННЫЙ ПРОЦЕСС ВЫДАЧИ КРЕДИТА ===
+Rel(bank, gw, "Кредитный процесс и администрирование —\nвсе запросы банка через шлюз", "HTTPS / JSON")
+
+Rel(gw, app, "Шаг 2. Заявка — решение в ответе (≤300 мс)", "HTTP")
+Rel(gw, acc, "Шаг 3. Открытие счетов", "HTTP")
+Rel(gw, doc, "Шаг 4. Черновик договора", "HTTP")
+Rel(gw, sign, "Шаг 5. Подписание\n(инициация → подтверждение)", "HTTP")
+
+Rel(app, cli, "2.1. Данные клиента и комплаенс-статус\nпри оценке заявки", "HTTP")
+Rel(app, prod, "2.2. Условия продукта\nдля кредитного предложения", "HTTP")
+
+' === СЕРВИСЫ ПЛАТФОРМЫ ===
+Rel(adm, kc, "Регистрация банков и сотрудников,\nназначение ролей", "HTTP")
+Rel(gw, adm, "Администрирование (сотрудники, роли)", "HTTP")
+
+Rel(cli, notif, "После регистрации банка —\nзапрос на уведомление", "HTTP")
+Rel_Back(notif, bank, "Уведомление о регистрации", "HTTPS")
+
+' === АСИНХРОННЫЙ КАНАЛ ===
+Rel(gw, facade, "Async-канал (шаг 6a: «принято» сразу,\nопрос статуса при необходимости)", "HTTP")
+Rel_Up(facade, app, "6b. Вызовы тех же REST-эндпоинтов\nиз очереди — в темпе сервисов;\nповтор при сбое безопасен", "HTTP")
+Rel_Up(facade, acc, "", "HTTP")
+Rel_Up(facade, doc, "", "HTTP")
+Rel_Up(facade, sign, "", "HTTP")
+Rel(facade, egw, "7. Уведомление о завершении", "HTTPS")
+Rel_Back(egw, bank, "Подписанный вебхук (напрямую на MVP)", "HTTPS")
+
+' === РАСКЛАДКА ===
+Lay_D(bank, gw)
+Lay_D(gw, biz)
+Lay_D(gw, facade)
+facade -[hidden]-> notif
+
+SHOW_LEGEND()
+@enduml

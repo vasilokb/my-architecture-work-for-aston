@@ -1,0 +1,111 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+' Архитектура Кредитного Конвейера с разделением UI и BFF
+' С учетом обсуждений о выносе бизнес-логики из фронтенда
+
+Person(client, "Клиент", "Представитель юридического лица")
+Person(admin, "Администратор", "Сотрудник банка")
+
+System_Boundary(credit_pipeline, "Кредитный Конвейер") {
+
+  ' ========== ФРОНТЕНД (UI Layer) ==========
+  Boundary(frontend, "Фронтенд") {
+    Container(client_ui, "Клиентский UI", "JavaScript/React", "Веб-приложение для клиентов\n• Подача заявок\n• Просмотр статусов\n• Загрузка документов")
+
+    Container(admin_ui, "Админский UI", "JavaScript/React", "Внутренний интерфейс для сотрудников банка\n• Управление заявками\n• Согласование\n• Мониторинг процессов")
+  }
+
+  ' ========== API GATEWAY ==========
+  Container(api_gateway, "API Gateway", "Spring Cloud Gateway", "Единая точка входа\n• Маршрутизация по префиксам\n• Аутентификация (JWT)\n• Rate limiting\n• /api/client/** → Client BFF\n• /api/admin/** → Admin BFF")
+
+  ' ========== BFF LAYER ==========
+  Boundary(bff_layer, "BFF (Backend-for-Frontend)") {
+    Container(client_bff, "Client BFF", "Spring Boot", "Адаптер для клиентского UI\n• Агрегация данных из сервисов\n• Упрощенные DTO\n• Кэширование частых запросов")
+
+    Container(admin_bff, "Admin BFF", "Spring Boot", "Адаптер для админского UI\n• Сложные запросы с фильтрацией\n• Массовые операции\n• Расширенные отчеты")
+  }
+
+  ' ========== БИЗНЕС-СЕРВИСЫ (Core Business Logic) ==========
+  Boundary(business_services, "Бизнес-сервисы (Ядро Кредитного Конвейера)") {
+    Container(loan_request, "loanrequest-server", "Spring Boot", "Управление заявками на кредит\n• Создание/редактирование\n• Хранение состояния\n• Валидация данных")
+
+    Container(orchestrator, "orchestrator-server", "Spring Boot", "Оркестратор процессов (Saga)\n• Управление State Machine\n• Координация этапов\n• Таймеры и уведомления")
+
+    Container(scoring, "scoring-server", "Spring Boot", "Скоринг и расчет лимитов\n• Оценка кредитоспособности\n• Расчет процентной ставки\n• Определение лимитов")
+
+    Container(deal_service, "loandeal-server", "Spring Boot", "Управление сделками\n• Оформление кредитных договоров\n• Отслеживание выплат\n• История операций")
+
+    Container(client_service, "client-server", "Spring Boot", "Управление данными клиентов\n• Профили ЮЛ\n• Контактная информация\n• История взаимодействий")
+
+    Container(notification, "notifications-server", "Spring Boot", "Управление уведомлениями\n• Email/SMS рассылки\n• Шаблоны сообщений\n• Очередь отправки")
+  }
+
+  ' ========== ИНФРАСТРУКТУРА ==========
+  Boundary(infrastructure, "Инфраструктура") {
+    ContainerDb(postgres, "PostgreSQL", "Database", "Основное хранилище данных\n• Заявки и сделки\n• Клиентские данные\n• История процессов")
+
+    ContainerDb(redis, "Redis", "Cache & Session Store", "Кэш данных\n• Сессии пользователей\n• Временные состояния\n• Счетчики и лимиты")
+
+    ContainerQueue(kafka, "Kafka", "Message Broker", "Шина событий для асинхронной коммуникации\n• События процессов\n• Команды между сервисами\n• Интеграционные события")
+
+    Container(storage, "Object Storage", "S3/MinIO", "Хранилище документов\n• Скан-копии\n• PDF договоры\n• Архивные файлы")
+  }
+}
+
+' ========== ВНЕШНИЕ СИСТЕМЫ ==========
+System_Ext(bki, "БКИ / НБКИ", "Внешние кредитные бюро")
+System_Ext(payment_systems, "Платежные системы", "Внешние платежные шлюзы")
+
+' ========== ОСНОВНЫЕ ПОТОКИ ==========
+
+' Клиентский поток
+Rel(client, client_ui, "Использует", "HTTPS")
+Rel(client_ui, api_gateway, "API запросы", "REST/JSON")
+Rel(api_gateway, client_bff, "Маршрутизация /api/client/**")
+Rel(client_bff, business_services, "Вызов бизнес-логики")
+
+' Админский поток
+Rel(admin, admin_ui, "Использует", "HTTPS (через VPN)")
+Rel(admin_ui, api_gateway, "API запросы", "REST/JSON")
+Rel(api_gateway, admin_bff, "Маршрутизация /api/admin/**")
+Rel(admin_bff, business_services, "Вызов бизнес-логики")
+
+' BFF -> Сервисы (ключевые связи)
+Rel(client_bff, loan_request, "Создание/просмотр заявок")
+Rel(client_bff, client_service, "Получение данных клиента")
+Rel(admin_bff, loan_request, "Управление заявками (поиск, фильтры)")
+Rel(admin_bff, orchestrator, "Управление процессами")
+Rel(admin_bff, scoring, "Просмотр скоринга и лимитов")
+
+' Взаимодействие сервисов между собой
+Rel(loan_request, orchestrator, "Запуск процесса одобрения")
+Rel(orchestrator, scoring, "Запрос расчета лимита")
+Rel(orchestrator, deal_service, "Создание сделки после одобрения")
+Rel(orchestrator, notification, "Отправка уведомлений")
+Rel(deal_service, client_service, "Привязка сделки к клиенту")
+
+' Интеграция с внешними системами
+Rel(scoring, bki, "Запрос кредитной истории", "REST/SOAP")
+Rel(deal_service, payment_systems, "Инициация выплаты", "REST")
+
+' Использование инфраструктуры
+Rel(loan_request, postgres, "Хранение данных заявок")
+Rel(client_service, postgres, "Хранение данных клиентов")
+Rel(deal_service, postgres, "Хранение данных сделок")
+Rel(loan_request, redis, "Кэширование справочников")
+Rel(client_bff, redis, "Кэширование агрегированных данных")
+Rel(api_gateway, redis, "Хранение сессий")
+
+' Асинхронная коммуникация через Kafka
+Rel(loan_request, kafka, "Публикует: loan.request.created")
+Rel(orchestrator, kafka, "Публикует: workflow.step.completed")
+Rel(scoring, kafka, "Публикует: scoring.calculated")
+Rel(notification, kafka, "Подписывается на события для уведомлений")
+
+' Хранение документов
+Rel(deal_service, storage, "Сохранение договоров")
+Rel(loan_request, storage, "Сохранение прикрепленных файлов")
+
+SHOW_LEGEND()
+@enduml

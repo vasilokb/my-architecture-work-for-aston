@@ -1,0 +1,259 @@
+@startuml
+title ER Диаграмма БД фабрики страховых продуктов (Гибкая версия)
+' Включает механизмы для динамического добавления параметров без доработки таблиц
+
+package "Справочники регуляторов" {
+  entity "reg_line_of_business" {
+    + id : UUID <<PK>>
+    --
+    regulator_code : VARCHAR(50)
+    name : VARCHAR(255)
+    mandatory_or_voluntary : VARCHAR(20)
+    regulatory_document : TEXT
+  }
+
+  entity "reg_activity_codes" {
+    + code : VARCHAR(20) <<PK>>
+    --
+    description : VARCHAR(255)
+  }
+}
+
+package "Каталог страховых продуктов" {
+  entity "line_of_business" {
+    + id : UUID <<PK>>
+    --
+    internal_code : VARCHAR(50)
+    reg_line_of_business_id : UUID <<FK>>
+    customer_name : VARCHAR(255)
+    sales_channels : JSONB
+  }
+
+  entity "product_template" {
+    + id : UUID <<PK>>
+    --
+    product_code : VARCHAR(50)
+    commercial_name : VARCHAR(255)
+    contractual_name : VARCHAR(255)
+    underwriting_class : VARCHAR(50)
+    release_form : VARCHAR(50)
+    line_of_business_id : UUID <<FK>>
+    reg_activity_code : VARCHAR(20) <<FK>>
+  }
+
+  entity "program_template" {
+    + id : UUID <<PK>>
+    --
+    program_code : VARCHAR(50)
+    name : VARCHAR(255)
+    coverage_level : VARCHAR(50)
+    special_conditions : TEXT
+    product_template_id : UUID <<FK>>
+  }
+
+  entity "coverage" {
+    + id : UUID <<PK>>
+    --
+    coverage_code : VARCHAR(50)
+    name : VARCHAR(255)
+    regulator_risk_type : VARCHAR(50)
+    coverage_limit : DECIMAL(15,2)
+    franchise : DECIMAL(15,2)
+    exclusions : TEXT
+    regulatory_act : VARCHAR(255)
+    program_template_id : UUID <<FK>>
+  }
+}
+
+package "Тарифная модель" {
+  entity "pricing_model" {
+    + id : UUID <<PK>>
+    --
+    model_id : VARCHAR(50)
+    model_type : VARCHAR(50)
+    regulator_basis : VARCHAR(255)
+    effective_from : DATE
+    effective_to : DATE
+    version : INTEGER
+    status : VARCHAR(20)
+    program_template_id : UUID <<FK>>
+  }
+
+  entity "reg_rate" {
+    + id : UUID <<PK>>
+    --
+    base_rate : DECIMAL(10,4)
+    territory_coefficient : DECIMAL(5,2)
+    effective_period : DATERANGE
+    document_reference : VARCHAR(255)
+    pricing_model_id : UUID <<FK>>
+  }
+
+  entity "pricing_factor" {
+    + id : UUID <<PK>>
+    --
+    factor_code : VARCHAR(50)
+    name : VARCHAR(255)
+    value_type : VARCHAR(20)
+    data_source : VARCHAR(100)
+    mandatory : BOOLEAN
+    pricing_model_id : UUID <<FK>>
+  }
+}
+
+package "Рабочие объекты расчёта" {
+  entity "quote_request" {
+    + id : UUID <<PK>>
+    --
+    request_id : VARCHAR(100)
+    sales_channel : VARCHAR(50)
+    product_template_id : UUID <<FK>>
+    program_template_id : UUID <<FK>>
+    created_at : TIMESTAMPTZ
+  }
+
+  entity "quote_result" {
+    + id : UUID <<PK>>
+    --
+    total_premium : DECIMAL(15,2)
+    product_version : VARCHAR(50)
+    pricing_model_version : VARCHAR(50)
+    quote_validity : INTERVAL
+    quote_request_id : UUID <<FK>>
+    pricing_model_id : UUID <<FK>>
+    calculated_at : TIMESTAMPTZ
+  }
+
+  entity "gov_checks" {
+    + id : UUID <<PK>>
+    --
+    vehicle_check : BOOLEAN
+    property_check : BOOLEAN
+    document_check : BOOLEAN
+    history_check : BOOLEAN
+    quote_request_id : UUID <<FK>>
+  }
+}
+
+' === ДИНАМИЧЕСКИЕ АТРИБУТЫ (EAV-модель) ===
+package "Динамические атрибуты" {
+  entity "dynamic_attribute" {
+    + id : UUID <<PK>>
+    --
+    attribute_code : VARCHAR(100) <<UNIQUE>>
+    name : VARCHAR(255)
+    description : TEXT
+    data_type : VARCHAR(50)  -- STRING, NUMBER, BOOLEAN, DATE, JSON
+    entity_type : VARCHAR(50)  -- PRODUCT_TEMPLATE, PROGRAM_TEMPLATE, COVERAGE, PRICING_FACTOR, etc.
+    is_required : BOOLEAN
+    default_value : TEXT
+    validation_schema : JSONB  -- JSON Schema для валидации
+    ui_config : JSONB  -- Конфигурация для UI (порядок, группа, видимость)
+    created_at : TIMESTAMPTZ
+    updated_at : TIMESTAMPTZ
+  }
+
+  entity "attribute_group" {
+    + id : UUID <<PK>>
+    --
+    group_code : VARCHAR(100)
+    name : VARCHAR(255)
+    description : TEXT
+    entity_type : VARCHAR(50)
+    display_order : INTEGER
+  }
+
+  entity "entity_attribute_value" {
+    + id : UUID <<PK>>
+    --
+    entity_type : VARCHAR(50)
+    entity_id : UUID
+    attribute_id : UUID <<FK>>
+    string_value : TEXT
+    number_value : DECIMAL(20,6)
+    boolean_value : BOOLEAN
+    date_value : DATE
+    json_value : JSONB
+    created_at : TIMESTAMPTZ
+    updated_at : TIMESTAMPTZ
+  }
+
+  entity "attribute_validation" {
+    + id : UUID <<PK>>
+    --
+    attribute_id : UUID <<FK>>
+    validation_type : VARCHAR(50)  -- REGEX, RANGE, ENUM, CUSTOM
+    validation_rule : TEXT
+    error_message : VARCHAR(500)
+  }
+}
+
+' Связи многие-ко-многим для выбранных покрытий
+entity "quote_request_coverage" {
+  + quote_request_id : UUID <<PK, FK>>
+  + coverage_id : UUID <<PK, FK>>
+  --
+  selected : BOOLEAN
+  custom_limit : DECIMAL(15,2)
+}
+
+' Связи многие-ко-многим для атрибутов и групп
+entity "attribute_group_mapping" {
+  + attribute_id : UUID <<PK, FK>>
+  + group_id : UUID <<PK, FK>>
+  --
+  display_order : INTEGER
+  is_visible : BOOLEAN
+}
+
+' Основные связи
+reg_line_of_business ||--o{ line_of_business : "отображается в"
+reg_activity_codes ||--o{ product_template : "использует код вида деятельности"
+line_of_business ||--o{ product_template : "включает"
+product_template ||--o{ program_template : "содержит"
+program_template ||--o{ coverage : "состоит из"
+program_template ||--o{ pricing_model : "имеет"
+pricing_model ||--o{ reg_rate : "включает ставки регулятора"
+pricing_model ||--o{ pricing_factor : "использует"
+quote_request }o--|| product_template : "ссылается на шаблон"
+quote_request }o--|| program_template : "ссылается на программу"
+quote_request }o--o{ coverage : "содержит выбор покрытий"
+quote_result }o--|| quote_request : "результат для запроса"
+quote_result }o--|| pricing_model : "фиксирует версию тарифа"
+gov_checks }o--|| quote_request : "проверки для запроса"
+
+' Связь многие-ко-многим
+quote_request ||--o{ quote_request_coverage : "выбранные покрытия"
+coverage ||--o{ quote_request_coverage : "входит в запросы"
+
+' Связи для динамических атрибутов
+dynamic_attribute ||--o{ entity_attribute_value : "имеет значения"
+attribute_group ||--o{ attribute_group_mapping : "содержит атрибуты"
+dynamic_attribute ||--o{ attribute_group_mapping : "принадлежит группам"
+dynamic_attribute ||--o{ attribute_validation : "имеет правила валидации"
+
+' Примеры использования динамических атрибутов:
+note right of dynamic_attribute
+  Примеры атрибутов:
+  1. Для PRODUCT_TEMPLATE:
+     - required_documents (JSON)
+     - min_age (NUMBER)
+     - max_coverage_amount (NUMBER)
+  2. Для COVERAGE:
+     - territorial_restrictions (JSON)
+     - waiting_period_days (NUMBER)
+  3. Для PRICING_FACTOR:
+     - validation_rules (JSON)
+     - depends_on_other_factor (BOOLEAN)
+end note
+
+note right of entity_attribute_value
+  Значения хранятся в соответствующем
+  типизированном поле в зависимости
+  от data_type атрибута.
+  Например, для data_type='NUMBER'
+  используется number_value.
+end note
+
+@enduml
+

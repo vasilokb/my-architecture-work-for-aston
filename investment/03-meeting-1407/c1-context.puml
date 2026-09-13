@@ -1,0 +1,53 @@
+﻿@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Контекстная диаграмма (C4 L1) — Liberty Investment (AS-IS)
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 40
+skinparam ranksep 30
+skinparam backgroundColor transparent
+
+' ЛЕГЕНДА ЦВЕТОВ (AS-IS — по физическому/требуемому положению):
+'   #5B9BD5 = клиентская часть
+'   #70AD47 = административная часть
+'   #F4B400 = проблема архитектуры (долг / дыра)
+
+' === АКТОРЫ ===
+Person(клиент, "Клиент\n(Инвестор)", "Регистрируется, торгует,\nуправляет портфелем")
+Person(менеджер, "Менеджер\nкомпании", "Ведёт клиентов, поддержка,\nHR, образование, финансы")
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(moex, "MOEX", "Котировки")
+System_Ext(keycloak, "Keycloak (IdP)", "Аутентификация клиентов\n(только клиентская часть)")
+
+' === ГЛАВНАЯ СИСТЕМА: ДВЕ ЧАСТИ AS-IS ===
+System_Boundary(liberty, "Liberty Investment") {
+
+    System(клиент_часть, "Клиентская часть\n(ядро учёта)", "account, catalog, customer (+auth!),\ndocument, emulator, notification, otp,\ntrading (+API Gateway как точка входа)\n\n⚠ безопасность клиента РАЗМАЗАНА:\n  customer-service держит auth/registration/2FA") #5B9BD5
+
+    System(админ_часть, "административная часть\n(модули)", "userinfo, support, employee, auth,\neducation, test, management-pb,\nfinancialtransactions, tax, customercare\n\n⚠ безопасность менеджера в auth-service,\nНО @PreAuthorize только в management-pb/education;\nuserinfo — БЕЗ авторизации операций") #70AD47
+}
+
+' === СВЯЗИ АКТОРОВ ===
+Rel(клиент, клиент_часть, "HTTPS / WebSocket", "Торгует, портфель")
+Rel(менеджер, админ_часть, "HTTPS", "Back-office")
+
+' === ВЗАИМОДЕЙСТВИЕ ЧАСТЕЙ ===
+Rel(админ_часть, клиент_часть, "Feign/Kafka", "Агрегация клиентских данных")
+Rel(клиент_часть, админ_часть, "REST/Kafka (read)", "Курсы, портфели, тесты")
+
+' === ВНЕШНИЕ ===
+Rel(клиент_часть, moex, "Котировки", "HTTPS/Feign")
+Rel(клиент_часть, keycloak, "Token introspection", "HTTPS")
+Rel(админ_часть, keycloak, "косвенно через клиентские сервисы", "Feign")
+
+legend right
+  |= Цвет |= Значение |
+  |<back:#5B9BD5>   </back>| Клиентская часть |
+  |<back:#70AD47>   </back>| административная часть |
+  |<back:#F4B400>   </back>| Проблема архитектуры (долг / дыра) |
+endlegend
+
+@enduml

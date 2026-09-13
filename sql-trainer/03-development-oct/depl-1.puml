@@ -1,0 +1,162 @@
+@startuml
+skinparam backgroundColor #F5F5F5
+skinparam defaultFontName Arial
+skinparam linetype ortho
+skinparam shadowing false
+skinparam dpi 180
+
+!define DEV_COLOR #E6F3FF
+!define STAGE_COLOR #FFF2CC
+!define PROD_COLOR #FFE6E6
+
+' === Палитра ===
+skinparam node<<PROD>> {
+  BackgroundColor #FFE6E6
+  BorderColor #8B0000
+}
+skinparam node<<STAGE>> {
+  BackgroundColor #FFF2CC
+  BorderColor #DAA520
+}
+skinparam node<<DEV>> {
+  BackgroundColor #E6F3FF
+  BorderColor #1E90FF
+}
+
+' === Инфраструктура ===
+cloud "Andersen Internal Infrastructure" as ANDERSEN #FFF2CC {
+  node "CI/CD Pipeline" <<DEV>> as CI_CD {
+    [<color:#666>GitHub</color>\nSource Code] as GITHUB #CCCCCC
+    [<color:#666>Jenkins</color>\nBuild & Deployment] as JENKINS #CCCCCC
+    database "<color:#666>Nexus</color>\nDocker Registry" as NEXUS #CCCCCC
+  }
+
+  node "Identity Provider" as IDENTITY {
+    [<color:#666>Keycloak</color>\nOIDC Provider] as KEYCLOAK #CCCCCC
+  }
+}
+
+cloud "Hetzner Cloud\nProduction Hosting" as HETZNER #FFE6E6
+ANDERSEN ..> HETZNER : TLS/SSL VPN
+
+' === Production Environment ===
+node "Production Environment" <<PROD>> as PROD {
+  node "Production Host" <<PROD>> as PROD_HOST {
+
+    node "Docker Network" <<PROD>> as PROD_DOCKER {
+      [<color:#4169E1>Nginx Reverse Proxy</color>\nTLS, static files] as PROD_NGINX #DAE8FC
+      [<color:#4169E1>Web SPA</color>\nReact/TypeScript] as PROD_FRONTEND #DAE8FC
+      [<color:#4169E1>API Gateway</color>\nSpring Cloud Gateway] as PROD_GATEWAY #DAE8FC
+
+      frame "Backend Services" {
+        [<color:#4169E1>Users Service</color>] as PROD_USERS #DAE8FC
+        [<color:#4169E1>Tasks Service</color>] as PROD_TASKS #DAE8FC
+        [<color:#4169E1>Progress Service</color>] as PROD_PROGRESS #DAE8FC
+        [<color:#8B0000>Execution Service</color>\nN slots + queue] as PROD_EXEC #F8CECC
+      }
+
+      frame "Databases" {
+        database "<color:#2E8B57>Users DB</color>\nPostgreSQL" as PROD_USERS_DB #D5E8D4
+        database "<color:#2E8B57>Tasks DB</color>\nPostgreSQL" as PROD_TASKS_DB #D5E8D4
+        database "<color:#2E8B57>Progress DB</color>\nPostgreSQL" as PROD_PROGRESS_DB #D5E8D4
+        database "<color:#2E8B57>Training PostgreSQL</color>\nRead-only datasets" as PROD_TRAINING_DB #D5E8D4
+      }
+    }
+  }
+}
+
+' === Stage Environment ===
+node "Stage Environment" <<STAGE>> as STAGE {
+  node "Stage Host" <<STAGE>> as STAGE_HOST {
+    node "Docker Network" <<STAGE>> as STAGE_DOCKER {
+      [<color:#4169E1>Nginx</color>] as STAGE_NGINX #DAE8FC
+      [<color:#4169E1>Web SPA</color>] as STAGE_FRONTEND #DAE8FC
+      [<color:#4169E1>API Gateway</color>] as STAGE_GATEWAY #DAE8FC
+      [<color:#4169E1>All Services</color>] as STAGE_SERVICES #DAE8FC
+      database "<color:#2E8B57>All Databases</color>" as STAGE_DBS #D5E8D4
+    }
+  }
+}
+
+' === Dev Environment ===
+node "Development Environment" <<DEV>> as DEV {
+  node "Dev Host" <<DEV>> as DEV_HOST {
+    node "Docker Network" <<DEV>> as DEV_DOCKER {
+      [<color:#4169E1>Nginx</color>] as DEV_NGINX #DAE8FC
+      [<color:#4169E1>Web SPA</color>] as DEV_FRONTEND #DAE8FC
+      [<color:#4169E1>API Gateway</color>] as DEV_GATEWAY #DAE8FC
+      [<color:#4169E1>All Services</color>] as DEV_SERVICES #DAE8FC
+      database "<color:#2E8B57>All Databases</color>" as DEV_DBS #D5E8D4
+    }
+  }
+}
+
+' === CI/CD Flow ===
+GITHUB -[#008000]-> JENKINS : Code Push
+JENKINS -[#008000]-> NEXUS : Build Images
+NEXUS -[#008000]-> DEV_HOST : Auto-deploy Dev
+NEXUS -[#008000]-> STAGE_HOST : Auto-deploy Stage
+NEXUS -[#008000,dashed]-> PROD_HOST : Manual Approval
+
+' === User Access ===
+[<color:#1E90FF>Trainee</color>\nSQL Student] as TRAINEE #FFD700
+[<color:#1E90FF>Mentor</color>\nTask Author] as MENTOR #FFD700
+
+TRAINEE -[#1E90FF]-> PROD_NGINX : https://sql-trainer.andersenlab.com
+MENTOR -[#1E90FF]-> PROD_NGINX : Admin features
+
+' === Authentication ===
+PROD_FRONTEND -[#FF4500]-> KEYCLOAK : OIDC Login
+PROD_GATEWAY -[#FF4500]-> KEYCLOAK : JWT Validation
+
+' === Service Communication ===
+PROD_NGINX -[#1E90FF]-> PROD_FRONTEND : Static files
+PROD_NGINX -[#1E90FF]-> PROD_GATEWAY : API requests
+
+PROD_GATEWAY -[#1E90FF]-> PROD_USERS : REST /users/*
+PROD_GATEWAY -[#1E90FF]-> PROD_TASKS : REST /tasks/*
+PROD_GATEWAY -[#1E90FF]-> PROD_PROGRESS : REST /progress/*
+PROD_GATEWAY -[#1E90FF]-> PROD_EXEC : REST /exec/run
+
+PROD_USERS -[#2E8B57]-> PROD_USERS_DB : JDBC
+PROD_TASKS -[#2E8B57]-> PROD_TASKS_DB : JDBC
+PROD_PROGRESS -[#2E8B57]-> PROD_PROGRESS_DB : JDBC
+PROD_EXEC -[#2E8B57]-> PROD_TRAINING_DB : JDBC Read-only
+
+' === Monitoring ===
+cloud "Monitoring" as MONITORING #CCCCCC {
+  [<color:#666>Prometheus</color>] as PROMETHEUS #CCCCCC
+  [<color:#666>Grafana</color>] as GRAFANA #CCCCCC
+}
+
+PROD_EXEC -[#666]-> PROMETHEUS : SQL Metrics
+PROD_GATEWAY -[#666]-> PROMETHEUS : API Metrics
+PROD_NGINX -[#666]-> PROMETHEUS : Access logs
+
+' === Internal Notes ===
+note right of PROD_EXEC
+  <b>Execution Service:</b>
+  • 10-20 execution slots
+  • Internal FIFO queue
+  • SQL timeout: 800ms
+  • Auto LIMIT 200 rows
+  • Read-only training data
+end note
+
+note right of PROD_DOCKER
+  <b>MVP Scale:</b>
+  • 500 concurrent users
+  • 20 DB connections pool
+  • Bulkhead pattern
+  • Rate limiting per user
+end note
+
+legend right
+  | Color | Purpose |
+  | Blue | Frontend/API |
+  | Red | Critical Service |
+  | Green | Data Flow |
+  | Orange | Auth |
+end legend
+
+@enduml

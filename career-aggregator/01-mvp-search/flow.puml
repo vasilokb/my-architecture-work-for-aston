@@ -1,0 +1,157 @@
+@startuml
+skinparam backgroundColor #F5F5F5
+skinparam sequence {
+  ArrowColor #1976D2
+  LifeLineBorderColor #0D47A1
+  LifeLineBackgroundColor #E3F2FD
+  ParticipantBorderColor #4CAF50
+  ParticipantBackgroundColor #E8F5E8
+  ParticipantFontColor #2E7D32
+  ActorBorderColor #FF9800
+  ActorBackgroundColor #FFF3E0
+  ActorFontColor #E65100
+}
+
+title Поток данных: Семантический поиск вакансий
+
+actor "Пользователь" as User
+participant "Streamlit UI" as UI
+participant "FastAPI Backend" as API
+participant "LLM Service" as LLM
+participant "Cache Service" as Cache
+participant "HH.ru API" as HH
+participant "Embedding Service" as EMB
+
+== Основной сценарий поиска ==
+
+User -> UI : Ввод поискового запроса\n"системный аналитик, минск, сеньор"
+UI -> API : POST /api/search\n{query: "системный аналитик, минск, сеньор"}
+
+API -> Cache : Проверка кэша по ключу запроса
+alt Кэш найден
+  Cache --> API : Возврат кэшированных результатов
+  API --> UI : Ответ с результатами
+  UI --> User : Отображение результатов
+else Кэш отсутствует
+  Cache --> API : Кэш не найден
+  API -> LLM : Запрос на парсинг запроса
+  LLM -> LLM : Анализ естественного языка
+  LLM --> API : Структурированные параметры\n{profession: "системный аналитик",\nlocation: "минск",\nexperience: "between3And6"}
+  
+  API -> HH : GET /vacancies\n?text=системный+аналитик&area=минск&experience=between3And6
+  HH -> HH : Поиск в базе данных
+  HH --> API : Список вакансий (до 2000)
+  
+  API -> EMB : Запрос на векторизацию\nвакансий и исходного запроса
+  EMB -> EMB : Генерация эмбеддингов
+  EMB --> API : Векторные представления
+  
+  API -> API : Расчет косинусного сходства\nи ранжирование
+  
+  API -> Cache : Сохранение результатов в кэш\nс TTL=1 час
+  
+  API --> UI : Отсортированные результаты
+  UI --> User : Отображение ранжированных\nвакансий с релевантностью
+end
+
+== Детальный поток обработки ==
+
+group Парсинг запроса LLM
+  API -> LLM : parse_query("системный аналитик, минск, сеньор")
+  LLM -> LLM : Извлечение сущностей
+  note right of LLM
+    1. Профессия: "системный аналитик"
+    2. Локация: "минск" → код региона 16
+    3. Опыт: "сеньор" → between3And6
+    4. Неявные параметры:
+       - График: любой
+       - Зарплата: не указана
+  end note
+  LLM --> API : structured_params
+end
+
+group Поиск в HH.ru
+  API -> HH : Формирование API запроса
+  note right of HH
+    Параметры:
+    - text: "системный аналитик"
+    - area: 16 (Минск)
+    - experience: between3And6
+    - per_page: 100
+    - page: 0
+    - User-Agent: CareerAggregator/1.0
+  end note
+  HH --> API : JSON ответ
+  note left of API
+    Пример ответа:
+    {
+      "found": 245,
+      "pages": 3,
+      "per_page": 100,
+      "page": 0,
+      "items": [...]
+    }
+  end note
+end
+
+group Семантическое ранжирование
+  API -> EMB : generate_embeddings([вакансии...])
+  EMB -> EMB : Загрузка модели\nall-MiniLM-L6-v2
+  EMB --> API : vectors_vacancies[][]
+  
+  API -> EMB : generate_embedding("системный аналитик, минск, сеньор")
+  EMB --> API : vector_query[]
+  
+  API -> API : calculate_cosine_similarity(\nvector_query, vectors_vacancies)
+  API -> API : sort_by_similarity(vacancies)
+  note right of API
+    Алгоритм:
+    1. Для каждой вакансии вычисляем
+       косинусное сходство
+    2. Сортируем по убыванию сходства
+    3. Фильтруем порог > 0.3
+    4. Возвращаем топ-50 результатов
+  end note
+end
+
+== Обработка ошибок ==
+
+group Ошибка HH.ru API
+  API -> HH : Запрос вакансий
+  HH --> API : Ошибка 429 (Rate Limit)
+  API -> API : Ожидание 5 секунд
+  API -> HH : Повторный запрос
+  HH --> API : Успешный ответ
+end
+
+group Ошибка LLM Service
+  API -> LLM : Запрос парсинга
+  LLM --> API : Ошибка таймаута
+  API -> API : Fallback на rule-based парсинг
+  note right of API
+    Правила:
+    - Ищем профессию по ключевым словам
+    - Локация по списку городов
+    - Опыт по шаблонам (junior/middle/senior)
+  end note
+end
+
+== Кэширование ==
+
+group Стратегия кэширования
+  API -> Cache : cache_key = md5(query + params)
+  alt Первый запрос
+    Cache --> API : miss
+    API -> Cache : set(cache_key, results, ttl=3600)
+  else Повторный запрос
+    Cache --> API : hit
+    note right of Cache
+      Статистика кэша:
+      - Hit rate: ~70%
+      - Средний размер: 100KB/запрос
+      - TTL: 1 час для актуальности
+    end note
+  end
+end
+
+@enduml

@@ -1,0 +1,29 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Вариант 1: Внешние LLM API (OpenRouter) - Диаграмма компонентов
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' === КОМПОНЕНТЫ СИСТЕМЫ ===
+Component(vectorizationService, "Vectorization Service", "Python/FastAPI", "Получает текстовый запрос и возвращает вектор")
+
+Component(openrouterClient, "OpenRouter Client", "Python", "Клиент для работы с OpenRouter API")
+
+Component(cacheManager, "Cache Manager", "Python", "Кэширование векторов в Redis")
+
+ComponentDb(redis, "Redis", "Redis", "Хранилище кэшированных векторов")
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(openrouter, "OpenRouter API", "Внешний LLM API для векторизации")
+
+' === СВЯЗИ ===
+Rel(vectorizationService, openrouterClient, "Отправляет текст для векторизации", "HTTPS/REST")
+Rel(openrouterClient, openrouter, "Запрос на векторизацию", "HTTPS/REST")
+Rel(vectorizationService, cacheManager, "Сохраняет/получает векторы", "HTTPS/REST")
+Rel(cacheManager, redis, "Кэширование векторов", "TCP")
+
+@enduml

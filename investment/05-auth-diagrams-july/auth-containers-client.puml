@@ -1,0 +1,107 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма авторизации инвестора (C4 L2) — AS-IS\nФРОНТЕНД ↔ БЭКЕНД: какие сервисы участвуют и кто за что отвечает
+
+LAYOUT_LEFT_RIGHT()
+skinparam linetype ortho
+skinparam nodesep 28
+skinparam ranksep 42
+skinparam backgroundColor transparent
+skinparam ContainerFontSize 11
+skinparam BoundaryFontSize 13
+skinparam ArrowColor #555555
+
+' ЛЕГЕНДА (роль в авторизации):
+'   #BDD7EE = IdP (выпускает токены)
+'   #5B9BD5 = ФРОНТЕНД-часть авторизации
+'   #70AD47 = БЭКЕНД-сервис авторизации
+'   #3CB371 = PEP (точка контроля доступа)
+'   #F4B400 = legacy / проблема
+'   #FFFFFF = хранилище / доставка
+
+Person(клиент, "Клиент\n(Инвестор)", "Логинится, торгует,\nподтверждает операции")
+
+System_Ext(keycloak, "Keycloak\n:30803", "IdP — Identity Provider.\nrealm test-BE, client token_client.\nOAuth 2.0 Password Grant.\n\nВыпускает access/refresh JWT\n(iss=realm, scope=profile).\nХранит учётки клиентов.") #BDD7EE
+
+' ====================================================================
+' ФРОНТЕНД — клиентская часть авторизации (всё в браузере)
+' ====================================================================
+Boundary(fe, "ФРОНТЕНД  —  клиентская часть авторизации (браузер)") {
+    Container(react_app, "React SPA", "React 18, Vite, RTK Query", "OAuth-клиент. УЧАСТВУЕТ В АВТОРИЗАЦИИ:\n\n• запускает Password Grant к Keycloak\n• хранит access_token в localStorage\n• хранит refresh_token в HttpOnly-cookie\n• перехватчик: шлёт Bearer на каждый запрос\n• при 401 → POST /refresh-token (обновление)\n• 2FA: запрашивает и отправляет OTP\n\n⚠ исходники не выкачаны локально\n(поток восстановлен по AQA)") #5B9BD5
+}
+
+' ====================================================================
+' БЭКЕНД — серверная часть авторизации
+' ====================================================================
+Boundary(be, "БЭКЕНД  —  серверная часть авторизации") {
+
+    Boundary(pep, "Точка контроля доступа") {
+        Container(api_gw, "API Gateway\n:31531", "Spring Cloud Gateway\n(WebFlux)", "PEP — проверяет «есть ли валидный токен».\nJwtFilter (17 клиентских маршрутов):\n• валидирует Keycloak-JWT\n  (introspection / подпись realm)\n• извлекает sub=customerId\n• инжектит header customer_id\n• НЕ авторизует операции\n⚠ .block() в реактивном коде") #3CB371
+    }
+
+    Boundary(auth_svc, "Сервисы авторизации") {
+        Container(customer_svc, "customer-service", "Spring Boot 3.5.0", "• Регистрация клиента (BCrypt)\n• OTP / 2FA (таблица Verification)\n• /refresh-token: обмен refresh\n  с Keycloak → новые токены + cookie\n⚠ legacy: собственный HS256-JWT\n  (/auth, JwtProvider, Redis)") #70AD47
+
+        Container(otp_svc, "otp-service", "Spring Boot 3.5.0", "Генерация/валидация OTP-кодов\n(2FA, подтверждение операций).\nХранилище кодов — Redis.") #70AD47
+    }
+
+    Boundary(aux, "Вспомогательные (доставка OTP)") {
+        Container(notification_svc, "notification-service", "Spring Boot 3.5.0", "Доставка OTP и уведомлений\nчерез Kafka → Push/SSE/Email") #FFFFFF
+    }
+
+    Boundary(downstream, "Downstream (доверяют PEP)") {
+        Container(ds, "account, catalog, document,\nemulator, trading", "Spring Boot / Kotlin", "НЕ проверяют токен сами —\nчитают header customer_id\nот Gateway.\nMethod-level security отсутствует.") #5B9BD5
+    }
+
+    ContainerDb(redis, "Redis (DB 6)", "Redis 7.2", "OTP-коды (otp-service),\nrate-limit,\nlegacy: tokens:{customerId}") #FFFFFF
+    ContainerDb(pg, "customer_service_db", "PostgreSQL 14", "Customer, CustomerSecurityInfo\n(флаги 2FA),\nVerification (OTP-операции)") #FFFFFF
+}
+
+' ====================================================================
+' ПОТОК АВТОРИЗАЦИИ (нумерация)
+' ====================================================================
+
+' --- ЛОГИН: фронтенд ↔ Keycloak (IdP) ---
+Rel(клиент, react_app, "1) логин/пароль", "")
+Rel(react_app, keycloak, "2) Password Grant\nPOST /openid-connect/token", "OAuth 2.0")
+Rel_Back(keycloak, react_app, "3) access_token + refresh_token\n→ localStorage + HttpOnly-cookie", "Keycloak JWT")
+
+' --- ЗАЩИЩЁННЫЕ ЗАПРОСЫ: фронтенд → PEP → downstream ---
+Rel(react_app, api_gw, "4) Bearer {Keycloak access}", "REST /api/v1/...")
+Rel(api_gw, ds, "5) прокси + header customer_id\n(после валидации токена)", "")
+
+' --- РЕГИСТРАЦИЯ / 2FA / REFRESH: фронтенд → customer-service ---
+Rel(react_app, customer_svc, "6) /registration, /otp, /otp/verify,\n/refresh-token (через Gateway)", "")
+Rel(customer_svc, keycloak, "7) обмен refresh_token realm\n(при /refresh-token)", "")
+Rel(customer_svc, otp_svc, "8) verify OTP (2FA)", "Feign")
+Rel(customer_svc, pg, "9) Customer, Verification, 2FA", "JPA")
+Rel(otp_svc, redis, "10) OTP-коды / rate-limit", "")
+
+' --- ДОСТАВКА OTP ---
+Rel(customer_svc, notification_svc, "11) Kafka: отправить OTP", "")
+Rel(notification_svc, клиент, "12) Push/SMS/Email OTP", "")
+
+legend right
+  |= Цвет |= Роль в авторизации |
+  |<back:#BDD7EE>   </back>| IdP — Keycloak (кто ты: выпускает токены) |
+  |<back:#5B9BD5>   </back>| Фронтенд-часть (OAuth-клиент) + downstream |
+  |<back:#3CB371>   </back>| PEP — API Gateway (есть ли валидный токен) |
+  |<back:#70AD47>   </back>| Бэкенд-сервис авторизации (customer/otp) |
+  |<back:#F4B400>   </back>| Legacy / проблема |
+  |<back:#FFFFFF>   </back>| Хранилище / доставка |
+endlegend
+
+note bottom of api_gw
+  <b>Кто за что отвечает в авторизации:</b>
+  |= Компонент |= Ответственность |
+  | React SPA (ФРОНТ) | запускает OAuth-флоу, хранит токены, шлёт Bearer, обновляет токен |
+  | Keycloak (IdP) | проверяет учётку, выпускает access/refresh JWT |
+  | API Gateway (PEP) | валидирует токен, прокидывает customer_id (но НЕ права операций) |
+  | customer-service | регистрация, 2FA/OTP, обмен refresh с Keycloak |
+  | otp-service | второй фактор (генерация/проверка OTP) |
+  | notification-service | доставка OTP (не принимает решений) |
+  | downstream | НЕ авторизуют — доверяют header customer_id от PEP |
+endnote
+
+@enduml

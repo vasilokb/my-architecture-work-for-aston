@@ -1,0 +1,369 @@
+@startuml
+!define RECTANGLE class
+skinparam componentStyle rectangle
+skinparam backgroundColor #F5F5F5
+skinparam defaultFontSize 14
+title Component Diagram - AI Presale Platform (Monolith Structure) with Active Learning
+
+' === ЛЕГЕНДА ===
+legend top
+  <color:#1E90FF>█</color> Frontend Components
+  <color:#FFD700>█</color> Business Logic Components
+  <color:#32CD32>█</color> Database/Storage
+  <color:#A9A9A9>█</color> External System
+  ---
+  <b>Line Styles:</b>
+  --→ HTTP/REST API calls
+  ..→ Async/Queue messages
+  -[bold]-> Database operations
+  <color:red>--></color> Active Learning extensions
+end legend
+
+' === FRONTEND LAYER ===
+
+package "Frontend Application (React)" {
+  component "Login Screen" as login_screen #1E90FF
+  note right of login_screen
+    <b>Экран входа</b>
+    - Аутентификация через Keycloak
+    - Перенаправление на главную
+  end note
+
+  component "Presales List Screen" as presales_list #1E90FF
+  note right of presales_list
+    <b>Список пресейлов</b>
+    - Таблица пресейлов
+    - Кнопка "Создать пресейл"
+    - Фильтры и поиск
+  end note
+
+  component "Presale Creation Screen" as presale_create #1E90FF
+  note right of presale_create
+    <b>Создание пресейла</b>
+    - Форма с названием
+    - Выбор специалистов
+    - Загрузка файлов
+  end note
+
+  component "Presale Detail Screen" as presale_detail #1E90FF
+  note right of presale_detail
+    <b>Детали пресейла</b>
+    - Метаданные пресейла
+    - Список загруженных файлов
+    - Кнопка "Начать анализ"
+  end note
+
+  component "Analysis Results Screen" as analysis_results #1E90FF
+  note right of analysis_results
+    <b>Результаты анализа</b>
+    - Таблица эпиков/задач
+    - PERT оценки по ролям
+    - Фильтры по специалистам
+    - Кнопки экспорта
+  end note
+
+  component "Result Editing Screen" as result_edit #1E90FF
+  note right of result_edit
+    <b>Редактирование результатов</b>
+    - Редактирование оценок
+    - Добавление/удаление задач
+    - Сохранение новой версии
+    - <color:red>Оценка качества результата</color>
+  end note
+}
+
+' === INFRASTRUCTURE LAYER ===
+
+component "API Gateway" as api_gateway #A9A9A9
+note right of api_gateway
+  <b>Внешний шлюз</b>
+  - Маршрутизация запросов
+  - Rate limiting
+  - CORS
+  - SSL termination
+end note
+
+component "Keycloak" as keycloak #A9A9A9
+note right of keycloak
+  <b>Аутентификация</b>
+  - OIDC аутентификация
+  - Управление пользователями
+  - Ролевая модель
+end note
+
+' === BACKEND MONOLITH ===
+
+package "Presale Monolith (FastAPI/Spring)" {
+  component "User Management" as user_mgmt #FFD700
+  note right of user_mgmt
+    <b>Управление пользователями</b>
+    - Профили пользователей
+    - Настройки
+    - История действий
+  end note
+
+  component "Presale Manager" as presale_mgr #FFD700
+  note right of presale_mgr
+    <b>CRUD пресейлов</b>
+    - Создание пресейла
+    - Список пресейлов
+    - Редактирование метаданных
+    - Удаление пресейла
+    - Обновление статусов
+  end note
+
+  component "File Processor" as file_proc #FFD700
+  note right of file_proc
+    <b>Обработка файлов</b>
+    - Загрузка файлов
+    - Парсинг PDF/DOCX/TXT
+    - OCR обработка
+    - Нормализация текста
+  end note
+
+  component "Processing Orchestrator" as proc_orch #FFD700
+  note right of proc_orch
+    <b>Оркестрация AI анализа</b>
+    - Запуск анализа документа
+    - Управление workflow
+    - Координация компонентов
+    - Обработка ошибок workflow
+    - <color:red>Выбор версии модели (А/Б тесты)</color>
+  end note
+
+  component "LLM Integrator" as llm_int #FFD700
+  note right of llm_int
+    <b>Интеграция с LLM</b>
+    - Управление промптами
+    - Вызовы к LLM API
+    - Валидация ответов
+    - Retry при ошибках API
+    - <color:red>Фиксация версии модели</color>
+  end note
+
+  component "Response Validator" as resp_validator #FFD700
+  note right of resp_validator
+    <b>Валидация ответов LLM</b>
+    - JSON schema validation
+    - Quality Gate (заглушки)
+    - Нормализация ролей
+    - Валидация структуры
+  end note
+
+  component "Analysis Engine" as analysis_eng #FFD700
+  note right of analysis_eng
+    <b>Анализ и расчеты</b>
+    - PERT расчеты
+    - Суммирование по ролям
+    - Расчет бюджетов
+    - Генерация комментариев
+  end note
+
+  component "Result Manager" as result_mgr #FFD700
+  note right of result_mgr
+    <b>Управление результатами</b>
+    - Хранение результатов
+    - Управление версиями
+    - Генерация отчетов
+    - Экспорт в форматы
+  end note
+
+  component "Queue Manager" as queue_mgr #FFD700
+  note right of queue_mgr
+    <b>Управление очередями</b>
+    - Асинхронные задачи
+    - Retry политики
+    - Мониторинг выполнения
+    - Уведомление об ошибках
+  end note
+
+  ' === ACTIVE LEARNING COMPONENTS ===
+  component "Feedback Collector" as feedback_collector #FFD700
+  note right of feedback_collector
+    <b><color:red>Сбор обратной связи</color></b>
+    - Прием оценок от пользователя
+    - Хранение фидбека
+    - Связь с raw_llm_outputs
+  end note
+
+  component "Training Data Selector" as training_selector #FFD700
+  note right of training_selector
+    <b><color:red>Отбор примеров для дообучения</color></b>
+    - Критерии: ошибки валидации
+    - Критерии: низкий Quality Gate
+    - Критерии: негативный фидбек
+    - Критерии: спорные случаи
+  end note
+
+  component "Dataset Exporter" as dataset_exporter #FFD700
+  note right of dataset_exporter
+    <b><color:red>Экспорт датасета</color></b>
+    - Формат JSONL для дообучения
+    - Инструкция + вход + выход
+    - Версионирование датасетов
+  end note
+
+  component "Model Version Manager" as model_version_mgr #FFD700
+  note right of model_version_mgr
+    <b><color:red>Управление версиями моделей</color></b>
+    - Привязка ответов к версии модели
+    - А/Б тестирование
+    - Постепенный rollout
+  end note
+
+  ' === DATABASES INSIDE MONOLITH ===
+  database "PostgreSQL (Users)" as postgres_users #32CD32
+  note right of postgres_users
+    <b>БД пользователей</b>
+    - users
+    - profiles
+    - settings
+  end note
+
+  database "PostgreSQL (Presales)" as postgres_presales #32CD32
+  note right of postgres_presales
+    <b>БД пресейлов</b>
+    - presales
+    - documents
+    - statuses
+    - analysis_status
+  end note
+
+  database "PostgreSQL (Files)" as postgres_files #32CD32
+  note right of postgres_files
+    <b>БД файлов</b>
+    - files
+    - metadata
+    - text_cache
+  end note
+
+  database "PostgreSQL (Processing)" as postgres_processing #32CD32
+  note right of postgres_processing
+    <b>БД обработки</b>
+    - processing_states
+    - workflow_steps
+    - status_history
+    - error_logs
+    - task_queue (SKIP LOCKED)
+  end note
+
+  database "PostgreSQL (LLM Raw)" as postgres_llm_raw #32CD32
+  note right of postgres_llm_raw
+    <b>БД сырых ответов LLM</b>
+    - raw_llm_outputs
+    - validation_errors
+    - prompt_versions
+    - ai_cache (для MVP)
+    - <color:red>model_version</color>
+    - <color:red>user_feedback</color>
+    - <color:red>feedback_score</color>
+    - <color:red>selected_for_training (bool)</color>
+  end note
+
+  database "PostgreSQL (Results)" as postgres_results #32CD32
+  note right of postgres_results
+    <b>БД результатов</b>
+    - results
+    - versions
+    - estimates
+    - validated_outputs
+    - comments
+  end note
+
+  database "PostgreSQL (Training)" as postgres_training #32CD32
+  note right of postgres_training
+    <b><color:red>БД для дообучения</color></b>
+    - training_datasets
+    - dataset_items
+    - model_versions
+    - ab_test_results
+    - training_jobs
+  end note
+
+  database "MinIO (File Storage)" as minio #32CD32
+  note right of minio
+    <b>Объектное хранилище</b>
+    - raw_files
+    - export_files
+  end note
+}
+
+' === EXTERNAL APIS ===
+
+component "External LLM API" as external_llm #A9A9A9
+note right of external_llm
+  <b>Внешний сервис</b>
+  - OpenAI / Anthropic / Ollama
+  - AI модели для анализа
+  - <color:red>API для дообучения (опционально)</color>
+end note
+
+' === CONNECTIONS ===
+
+' 1. Frontend to Infrastructure
+login_screen --> keycloak : "OIDC\nАутентификация"
+presales_list --> api_gateway : "HTTP\nСписок пресейлов"
+presale_create --> api_gateway : "HTTP\nСоздание пресейла"
+presale_detail --> api_gateway : "HTTP\nДетали пресейла"
+analysis_results --> api_gateway : "HTTP\nРезультаты анализа"
+result_edit --> api_gateway : "HTTP\nСохранение правок"
+result_edit --> api_gateway : "HTTP\nОценить результат" #red
+
+' 2. API Gateway to Backend
+api_gateway --> presale_mgr : "HTTP\nCRUD пресейлов"
+api_gateway --> file_proc : "HTTP\nЗагрузка файлов"
+api_gateway --> proc_orch : "HTTP\nЗапуск анализа"
+api_gateway --> result_mgr : "HTTP\nПолучение результатов"
+api_gateway --> feedback_collector : "HTTP\nСохранить фидбек" #red
+
+' 3. Authentication
+presale_mgr --> keycloak : "HTTP\nВалидация токенов"
+
+' 4. Internal workflow
+presale_mgr --> user_mgmt : "HTTP\nДанные пользователя"
+
+proc_orch --> file_proc : "HTTP\nПолучить текст файла"
+proc_orch --> queue_mgr : "Async\nПоставить в очередь"
+proc_orch --> llm_int : "HTTP\nЗапросить AI анализ"
+proc_orch --> model_version_mgr : "HTTP\nЗапросить версию для А/Б" #red
+
+queue_mgr --> llm_int : "Async\nОбработать задачу"
+
+llm_int --> resp_validator : "HTTP\nВалидировать ответ"
+resp_validator --> analysis_eng : "HTTP\nПередать валидные данные"
+analysis_eng --> result_mgr : "HTTP\nСохранить результат"
+
+' 5. Error feedback loops
+llm_int ..> proc_orch : "HTTP\nОшибка LLM API"
+resp_validator ..> proc_orch : "HTTP\nОшибка валидации"
+analysis_eng ..> proc_orch : "HTTP\nОшибка расчета"
+queue_mgr ..> proc_orch : "Async\nRetry exhausted"
+
+' 6. Status updates
+result_mgr --> presale_mgr : "HTTP\nОбновить статус пресейла"
+proc_orch --> presale_mgr : "HTTP\nОбновить статус анализа"
+
+' 7. Active Learning flows
+feedback_collector -[bold]-> postgres_llm_raw : "SQL\nupdate user_feedback" #red
+training_selector -[bold]-> postgres_llm_raw : "SQL\nselect candidates" #red
+training_selector -[bold]-> postgres_training : "SQL\nsave to dataset" #red
+dataset_exporter -[bold]-> postgres_training : "SQL\nread dataset" #red
+dataset_exporter --> external_llm : "HTTP\nотправить на дообучение (опционально)" #red
+model_version_mgr -[bold]-> postgres_training : "SQL\nmodel_versions" #red
+
+' 8. Database connections
+user_mgmt -[bold]-> postgres_users : "SQL\nusers, profiles"
+presale_mgr -[bold]-> postgres_presales : "SQL\npresales, statuses"
+file_proc -[bold]-> postgres_files : "SQL\nfiles, metadata"
+file_proc -[bold]-> minio : "S3 API\nraw files"
+proc_orch -[bold]-> postgres_processing : "SQL\nprocessing_states, task_queue"
+llm_int -[bold]-> postgres_llm_raw : "SQL\nraw_llm_outputs, ai_cache, model_version"
+resp_validator -[bold]-> postgres_llm_raw : "SQL\nvalidation_errors"
+analysis_eng -[bold]-> postgres_results : "SQL\nestimates, comments"
+result_mgr -[bold]-> postgres_results : "SQL\nresults, versions"
+result_mgr -[bold]-> minio : "S3 API\nexport files"
+
+' 9. External integrations
+llm_int --> external_llm : "HTTP\nLLM API calls"
+
+@enduml

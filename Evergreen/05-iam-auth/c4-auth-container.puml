@@ -1,0 +1,83 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Level 2 — Auth/Authz Containers (MVP ABS)
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 60
+
+Person(client_user, "Bank Employee", "Operator / Manager / Credit Manager (через UI банка)")
+Person(bank_admin, "Bank Admin", "bank_admin (владелец банка, через UI админки)")
+Person(platform_admin, "Platform Admin", "Менеджер платформы, через Admin UI")
+
+System_Boundary(edge, "Edge Layer") {
+    Container(kong, "Kong (API Gateway)", "Kong OSS + custom Lua plugin", "JWT-валидация через JWKS, blacklist в Redis, вызов OPA, проксирование")
+}
+
+System_Boundary(iam, "IAM Layer") {
+    Container(keycloak, "Keycloak", "Keycloak (realm: abs)", "IdP: выпуск JWT, аутентификация пользователей и сотрудников банков")
+    Container(admin_svc, "Admin Service", "Java / Spring Boot", "IAM CRUD: тенанты, роли, сотрудники. Service-account в Keycloak (client_credentials)")
+    Container(opa_bundle, "OPA Bundle Server", "Java / Spring Boot", "Сборка data.json из admin_db, push в OPA. Sync trigger от Admin Service + cron-джоб 5 мин")
+    Container(opa, "OPA (PDP)", "OPA (Open Policy Agent)", "Решение allow/deny по Rego-политике (abs.rbac.authz) + data.json bundle")
+}
+
+System_Boundary(data, "Auth Data Layer") {
+    ContainerDb(redis, "Redis", "Redis 7", "Blacklist (TTL 1 час для user, без TTL для tenant) + JWKS cache (TTL 5 мин)")
+    ContainerDb(admin_db, "admin_db", "PostgreSQL", "role_permissions (роль → allowed_methods), tenant_keycloak_clients (tenant_id → client_uuid)")
+}
+
+System_Boundary(biz, "Business Layer (для контекста)") {
+    Container(backend, "Backend Services", "Java / Spring Boot", "Account, Client, Transaction, etc. RLS по tenant_id в PostgreSQL — последний рубеж защиты")
+}
+
+' Внешние связи (люди)
+Rel(client_user, kong, "HTTPS / REST", "Bearer JWT")
+Rel(bank_admin, kong, "HTTPS / REST", "Bearer JWT")
+Rel(platform_admin, kong, "HTTPS / REST", "Bearer JWT")
+
+' Логин (Kong НЕ участвует)
+Rel_R(client_user, keycloak, "POST /realms/abs/protocol/openid-connect/token", "login → JWT")
+Rel_R(bank_admin, keycloak, "login → JWT")
+
+' Kong делает
+Rel(kong, redis, "EXISTS blacklist:*", "Lua plugin")
+Rel(kong, redis, "GET JWKS", "кэш 5 мин")
+Rel(kong, opa, "POST /v1/data/abs.rbac.authz/allow", "input: tenant_id, roles, method, path")
+
+' Kong проксирует (после auth/authz)
+Rel(kong, backend, "proxy request", "+X-User-Id, X-User-Roles")
+Rel(backend, kong, "response")
+
+' Admin Service ↔ Keycloak
+Rel(admin_svc, keycloak, "Keycloak Admin API", "client_credentials, service-account admin-service")
+
+' Admin Service ↔ admin_db
+Rel(admin_svc, admin_db, "CRUD role_permissions, tenant_keycloak_clients", "SQL")
+
+' Admin Service → OPA Bundle Server (trigger)
+Rel(admin_svc, opa_bundle, "POST /internal/v1/bundle/trigger", "sync")
+
+' OPA Bundle Server читает admin_db и пушит в OPA
+Rel(opa_bundle, admin_db, "SELECT role_permissions", "для data.json")
+Rel(opa_bundle, opa, "PUT /v1/policies/bundle", "data.json + Rego")
+
+' Keycloak выпускает токен с ролями (bank_admin, operator, ...)
+Rel_R(keycloak, client_user, "JWT (TTL 1 час)")
+
+note right of redis
+  **Blacklist = fast-path, не единственный механизм.**
+  Источник правды — Keycloak enabled=false.
+  Если Redis упадёт: новые токены не выдаются
+  Keycloak, старые протухают за 1 час.
+end note
+
+note bottom of opa
+  **Rego-политика обобщённая:**
+  abs.rbac.authz/allow
+  Проверяет tenant + role + method
+  по data.tenants + data.roles из bundle.
+end note
+
+SHOW_LEGEND()
+@enduml

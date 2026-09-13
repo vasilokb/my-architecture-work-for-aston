@@ -1,0 +1,28 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Вариант 2: Легковесные библиотеки для эмбеддингов (sentence-transformers) - Диаграмма компонентов
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' === КОМПОНЕНТЫ СИСТЕМЫ ===
+Component(vectorizationService, "Vectorization Service", "Python/FastAPI", "Получает текстовый запрос и возвращает вектор")
+
+Component(localModel, "Local Model", "sentence-transformers", "Локальная модель для создания эмбеддингов (all-MiniLM-L6-v2)")
+
+Component(modelManager, "Model Manager", "Python", "Управление загрузкой и использованием модели")
+
+Component(cacheManager, "Cache Manager", "Python", "Кэширование векторов в Redis")
+
+ComponentDb(redis, "Redis", "Redis", "Хранилище кэшированных векторов")
+
+' === СВЯЗИ ===
+Rel(vectorizationService, modelManager, "Запрос на векторизацию", "HTTPS/REST")
+Rel(modelManager, localModel, "Использует модель для инференса", "Python")
+Rel(vectorizationService, cacheManager, "Сохраняет/получает векторы", "HTTPS/REST")
+Rel(cacheManager, redis, "Кэширование векторов", "TCP")
+
+@enduml

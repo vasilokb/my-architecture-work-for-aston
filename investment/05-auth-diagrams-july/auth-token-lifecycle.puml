@@ -1,0 +1,119 @@
+@startuml
+title Жизненный цикл токена сотрудника и контроль доступа (RBAC)\nauth-service: /refresh · /verify · /verify/role · /verify/permissions · /access/verify/{permission} · /logout
+
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign center
+skinparam backgroundColor transparent
+skinparam responseMessageBelowArrow true
+
+actor Сотрудник as U
+participant "Downstream\nсервис / портал" as DS
+participant "API Gateway\n(AuthJwtFilter)" as GW
+participant "AuthEmployeesController\n(auth-service)" as C
+participant "AuthAccessService" as ACC
+participant "AuthTokenService" as TK
+participant "ProcessingTokenUtil" as JWT
+participant "SessionService" as SES
+participant "RolesService" as RS
+participant "PermissionsService" as PS
+participant "EmployeeService" as EMP
+participant "AuditLog" as LOG
+database "auth_db" as DB
+
+== A. REFRESH access-токена  (GET /refresh) ==
+
+U -> DS : действие (access истёк)
+DS -> GW : GET /refresh   Authorization: Bearer {refresh}
+GW -> C : headers
+C -> ACC : verifyAccess(headers, allRoles)
+ACC -> JWT : parseToken(headers) → TokenClaims
+ACC -> SES : getById(employeeId)
+note right of ACC #F4B400
+  Сессия null ИЛИ refreshToken == "logout"
+  → NotAuthenticatedError
+end note
+ACC -> JWT : parseToken(session.refreshToken) (повторно)
+ACC -> EMP : checkStatus(id)
+ACC -> RS : getByName(claims.roles)  + сверка roleId
+ACC --> C : employeeId (доступ есть)
+C -> TK : refreshToken(headers)
+TK -> JWT : parseToken + getToken
+TK -> SES : getById — сверка refreshToken
+note right of TK
+  session.refreshToken == "logout" → AccessDeniedError
+  session.refreshToken != token     → TokenNotValidError
+end note
+TK -> JWT : generateAccessToken(employee)
+TK -> SES : update(новый access, lastUsedAt)
+TK -> LOG : save(REFRESH)
+TK --> C : AuthorisationResponse{access, refresh}
+C --> DS : 200 OK
+
+== B. ПРОВЕРКА ТОКЕНА downstream  (GET /verify · /verify/role · /verify/permissions) ==
+
+DS -> GW : GET /verify/role   Bearer {access}
+GW -> C : headers
+C -> ACC : verifyAccess(headers, allRoles)
+ACC -> SES : проверка активной сессии (как в A)
+C -> TK : deserializeRole(headers)
+TK -> JWT : parseToken(headers) → claims
+TK -> SES : getById — активна? иначе AccessDeniedError
+TK --> C : RoleResponse{roles}
+C --> DS : 200 OK  →  gateway добавляет x-role
+
+note over DS, GW #DDDDDD
+  Сценарий: <b>downstream сервис</b> (напр. management-service-pb, userinfo-service)
+  обращается к auth-service, чтобы deserialize роли/права из токена и
+  положить их в заголовки x-role / x-permissions для целевого микросервиса.
+end note
+
+== C. КОНТРОЛЬ ДОСТУПА ПО ПРАВУ (RBAC)  (HEAD /access/verify/{permissionName}) ==
+
+DS -> GW : HEAD /access/verify/EMPLOYEE_EDIT   Bearer {access}
+GW -> C : headers + permission
+C -> ACC : verifyAccess(headers, allRoles, permission)
+ACC -> JWT : parseToken(headers) → claims
+ACC -> SES : checkSession (активна?)
+ACC -> EMP : checkStatus(employeeId)
+ACC -> RS : getByName(claims.roles)
+ACC -> ACC : roleId токена == roleId сотрудника?\nроль ∈ allRoles? иначе AccessDeniedError
+ACC -> PS : getAllByRoleId(employee.roleId)
+note right of ACC
+  <b>RBAC:</b>  Роль → список прав (Permission.name)
+  permission не входит в список → AccessDeniedError
+end note
+ACC --> C : SuccessfulResponse{true}
+C --> DS : 202 ACCEPTED
+
+== D. LOGOUT — отзыв токенов  (GET /logout) ==
+
+U -> DS : "Выйти"
+DS -> GW : GET /logout   Bearer {access}
+GW -> C : headers
+C -> ACC : verifyAccess(headers, allRoles)
+C -> TK : logout(headers)
+TK -> JWT : parseToken(headers) → employeeId
+TK -> SES : getById
+TK -> SES : update(accessToken="logout",\n   refreshToken="logout",\n   revokedAt=now)
+note right of TK
+  Маркер отзыва = строка "logout" в полях токенов.
+  При session.refreshToken == "logout" любая
+  последующая проверка → NotAuthenticatedError /
+  AccessDeniedError.
+end note
+TK -> CR : update(failedAttempts=0, lockTime=now)
+TK -> LOG : save(LOGOUT)
+TK --> C : LogoutResponse
+C --> DS : 202 ACCEPTED
+DS -> U : сеанс завершён
+
+note over U, DB #F4B400
+  <b>Замечания (AS-IS):</b>
+   • Отзыв реализован "флагом-строкой" в БД (не blacklist jti) — после истечения TTL
+     запись остаётся;新しい устройство создаёт новую Session, старая просто помечается.
+   • AuthAccessService.checkSession парсит refresh-токен дважды и сверяет roleId
+     из токена с roleId из БД сотрудника — защита от смены роли без перевыпуска токена.
+   • Роль/права берутся из БД при каждой проверке права (query БД на каждый /access/verify).
+end note
+
+@enduml

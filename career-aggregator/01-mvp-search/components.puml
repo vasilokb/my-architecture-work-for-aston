@@ -1,0 +1,97 @@
+@startuml
+!define RECTANGLE class
+skinparam componentStyle rectangle
+skinparam backgroundColor #F5F5F5
+skinparam component {
+  BackgroundColor #E3F2FD
+  BorderColor #1976D2
+  FontColor #0D47A1
+}
+skinparam interface {
+  BackgroundColor #FFF3E0
+  BorderColor #FF9800
+  FontColor #E65100
+}
+skinparam database {
+  BackgroundColor #E8F5E8
+  BorderColor #4CAF50
+  FontColor #2E7D32
+}
+
+title Компонентная архитектура Career Aggregator 2
+
+package "Веб-интерфейс" {
+  component "Streamlit UI" as UI {
+    [Поисковая форма]
+    [Фильтры]
+    [Результаты поиска]
+  }
+  note right of UI
+    Одностраничное приложение
+    Пользовательский интерфейс
+  end note
+}
+
+package "Бэкенд сервисы" {
+  component "FastAPI Backend" as API {
+    [REST API Endpoints]
+    [Обработка запросов]
+    [Оркестрация]
+  }
+  
+  component "LLM Service" as LLM {
+    [DeepSeek API Client]
+    [Парсинг запросов]
+    [Структурирование]
+  }
+  
+  component "Embedding Service" as EMB {
+    [Sentence-Transformers]
+    [Векторизация текста]
+    [Косинусное сходство]
+  }
+  
+  component "Cache Service" as CACHE {
+    [LRU Cache]
+    [In-memory storage]
+    [TTL управление]
+  }
+}
+
+package "Внешние системы" {
+  component "HH.ru API" as HH {
+    [Поиск вакансий]
+    [Справочные данные]
+    [Пагинация]
+  }
+  
+  database "Внешняя БД HH.ru" as HHDB
+}
+
+' Связи между компонентами
+UI --> API : HTTP запросы (JSON)
+API --> LLM : Запрос на парсинг
+API --> EMB : Запрос на векторизацию
+API --> HH : API запросы
+HH --> HHDB : Чтение данных
+API --> CACHE : Чтение/запись кэша
+EMB --> CACHE : Кэш эмбеддингов
+LLM --> CACHE : Кэш парсинга
+
+' Внешние зависимости
+cloud "DeepSeek API" as DEEPSEEK
+LLM --> DEEPSEEK : API вызовы
+
+note top of API
+  Основной оркестратор системы
+  Управляет потоком данных
+  Обрабатывает бизнес-логику
+end note
+
+note bottom of HH
+  Внешний источник данных
+  Ограничения: 2000 вакансий/запрос
+  User-Agent обязателен
+end note
+
+@enduml

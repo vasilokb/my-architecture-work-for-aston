@@ -1,0 +1,163 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - Liberty Investment
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' === ЛЮДИ ===
+Person(клиент, "Клиент (Инвестор)", "Использует мобильное/веб-приложение для инвестирования")
+Person(сотрудник, "Сотрудник банка", "Администратор, трейдер, операционист")
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(moex, "Московская биржа (MOEX)", "iss.moex.com — рыночные данные, котировки")
+System_Ext(keycloak, "Keycloak (IdP)", "Аутентификация, токены, realms")
+System_Ext(mail_server, "Почтовый сервер", "Отправка email-уведомлений")
+System_Ext(дбо_банк, "Цифровой банк (ДБО)", "Банковский портал, использующий инвестиционный модуль")
+
+' === НАША СИСТЕМА ===
+System_Boundary(liberty, "Liberty Investment") {
+
+    ' === ФРОНТЕНД ===
+    Boundary(frontend, "Фронтенд") {
+        Container(react_app, "React SPA", "React 18, Vite, Redux Toolkit, RTK Query", "Клиентское инвестиционное приложение")
+    }
+
+    ' === API GATEWAY ===
+    Boundary(gateway, "API Gateway") {
+        Container(api_gw, "API Gateway", "Spring Cloud Gateway WebFlux", "Маршрутизация, JWT + Keycloak auth, circuit breaker")
+    }
+
+    ' === КЛИЕНТСКИЕ СЕРВИСЫ ===
+    Boundary(client_services, "Клиентские сервисы (client/backend/)") {
+        Container(account_svc, "account-service", "Spring Boot 3.5.0", "Брокерские счета клиентов")
+        Container(customer_svc, "customer-service", "Spring Boot 3.5.0", "Регистрация, профиль, Keycloak integration")
+        Container(catalog_svc, "catalog-service", "Spring Boot 3.5.0", "Каталог финансовых инструментов, портфели")
+        Container(document_svc, "document-service", "Spring Boot 3.5.0", "Генерация документов, PDF")
+        Container(emulator_svc, "emulator-service", "Spring Boot 3.5.0, Kotlin", "Эмулятор биржи, обработка ордеров, данные MOEX")
+        Container(notification_svc, "notification-service", "Spring Boot 3.5.0", "Push/SSE/Email уведомления")
+        Container(otp_svc, "otp-service", "Spring Boot 3.5.0", "OTP-коды, верификация операций")
+    }
+
+    ' === АДМИНСКИЕ СЕРВИСЫ ===
+    Boundary(admin_services, "Админские сервисы (backend/)") {
+        Container(auth_svc, "auth-service", "Spring Boot 3.5.5", "Аутентификация сотрудников, JWT, роли, OTP")
+        Container(trading_svc, "trading-service", "Spring Boot 3.5.0", "Обработка ордеров, портфели, комиссии, Outbox")
+        Container(employee_svc, "employee-service", "Spring Boot 3.5.0", "Данные сотрудников")
+        Container(userinfo_svc, "userinfo-service", "Spring Boot 3.5.0", "Информация о пользователях, WebSocket")
+        Container(management_svc, "management-service-pb", "Spring Boot 3.5.0", "Управление, партнёрские кампании")
+        Container(education_svc, "education-service", "Spring Boot 3.5.0", "Образовательный контент (курсы, уроки)")
+        Container(document_pb_svc, "document-service-pb", "Spring Boot 3.5.0", "Документы для партнёрского банка")
+        Container(account_test_svc, "account-service-test", "Spring Boot 3.5.0", "Тестовый сервис счетов")
+        Container(tax_svc, "tax-service", "Spring Boot 3.5.0", "Налоговые расчёты, 2-NDFL")
+        Container(support_svc, "support-service", "Spring Boot 3.5.6", "Поддержка клиентов")
+        Container(financial_svc, "financialtransactions-service", "Spring Boot 3.5.0", "Финансовые транзакции")
+        Container(customercare_svc, "customercare-service", "Spring Boot 3.5.0", "Клиентский сервис")
+        Container(newsfeed_svc, "newsfeed-service", "Spring Boot 3.5.0", "Лента новостей")
+        Container(feedback_svc, "criticalfeedbackchannel", "Spring Boot 3.5.0", "Канал критических жалоб")
+    }
+}
+
+' =============================================
+' СВЯЗИ: ЛЮДИ → ФРОНТЕНД
+' =============================================
+Rel(клиент, react_app, "HTTPS", "Мобильное/веб-приложение")
+Rel(сотрудник, react_app, "HTTPS", "Внутренний интерфейс")
+
+' =============================================
+' СВЯЗИ: ВНЕШНИЕ СИСТЕМЫ
+' =============================================
+Rel(дбо_банк, api_gw, "REST API", "HTTPS")
+Rel(api_gw, keycloak, "Token introspection, Admin API", "HTTPS")
+Rel(emulator_svc, moex, "Котировки (акции, облигации, валюты, опционы, фьючерсы)", "HTTPS/Feign")
+Rel(notification_svc, mail_server, "Email уведомления", "SMTP")
+
+' =============================================
+' СВЯЗИ: ФРОНТЕНД → API GATEWAY
+' =============================================
+Rel(react_app, api_gw, "REST API + SSE", "HTTPS")
+
+' =============================================
+' СВЯЗИ: API GATEWAY → КЛИЕНТСКИЕ СЕРВИСЫ
+' =============================================
+Rel(api_gw, account_svc, "", "REST API")
+Rel(api_gw, customer_svc, "", "REST API")
+Rel(api_gw, catalog_svc, "", "REST API")
+Rel(api_gw, document_svc, "", "REST API")
+Rel(api_gw, emulator_svc, "", "REST API")
+Rel(api_gw, notification_svc, "", "REST API")
+Rel(api_gw, otp_svc, "", "REST API")
+
+' =============================================
+' СВЯЗИ: API GATEWAY → АДМИНСКИЕ СЕРВИСЫ
+' =============================================
+Rel(api_gw, auth_svc, "", "REST API")
+Rel(api_gw, trading_svc, "", "REST API")
+Rel(api_gw, employee_svc, "", "REST API")
+Rel(api_gw, userinfo_svc, "", "REST API")
+Rel(api_gw, management_svc, "", "REST API")
+Rel(api_gw, education_svc, "", "REST API")
+Rel(api_gw, document_pb_svc, "", "REST API")
+Rel(api_gw, account_test_svc, "", "REST API")
+Rel(api_gw, tax_svc, "", "REST API")
+Rel(api_gw, support_svc, "", "REST API")
+Rel(api_gw, financial_svc, "", "REST API")
+Rel(api_gw, customercare_svc, "", "REST API")
+Rel(api_gw, newsfeed_svc, "", "REST API")
+Rel(api_gw, feedback_svc, "", "REST API")
+
+' =============================================
+' KAFKA: ОРДЕРА (trading ↔ emulator)
+' =============================================
+Rel(trading_svc, emulator_svc, "order_request → order_result, order_errors", "Kafka")
+
+' =============================================
+' KAFKA: АКТИВЫ (emulator → catalog)
+' =============================================
+Rel(emulator_svc, catalog_svc, "actual_stocks/bonds/currencies/options/forts, actual_missing_response", "Kafka")
+Rel(catalog_svc, emulator_svc, "actual_missing_request", "Kafka")
+
+' =============================================
+' KAFKA: УВЕДОМЛЕНИЯ (все → notification)
+' =============================================
+Rel(trading_svc, notification_svc, "new_order, order_result_notification", "Kafka")
+Rel(otp_svc, notification_svc, "otp_notification", "Kafka")
+Rel(customer_svc, notification_svc, "user_auth_notification, user_registration", "Kafka")
+Rel(catalog_svc, notification_svc, "favourite_price", "Kafka")
+Rel(account_svc, notification_svc, "account_changes_notification, margin_call_notification", "Kafka")
+
+' =============================================
+' KAFKA: СЧЕТА (trading ↔ account)
+' =============================================
+Rel(trading_svc, account_svc, "accounts_request, trade_history", "Kafka")
+
+' =============================================
+' KAFKA: РЕГИСТРАЦИЯ (auth → employee → userinfo)
+' =============================================
+Rel(auth_svc, employee_svc, "register-account", "Kafka")
+Rel(employee_svc, userinfo_svc, "register-result", "Kafka")
+
+' =============================================
+' FEIGN: СИНХРОННЫЕ МЕЖСЕРВИСНЫЕ ВЫЗОВЫ
+' =============================================
+Rel(account_svc, customer_svc, "getCustomerInfo, generateOtp", "Feign")
+Rel(account_svc, document_svc, "generateDocuments", "Feign")
+Rel(catalog_svc, account_svc, "getAssetsFromAccountService", "Feign")
+Rel(document_svc, customer_svc, "getCustomerInfo, getTaxInfo", "Feign")
+Rel(document_svc, account_svc, "checkAccess", "Feign")
+Rel(document_svc, tax_svc, "get2ndfl", "Feign")
+Rel(notification_svc, customer_svc, "getCustomerInfo", "Feign")
+Rel(otp_svc, customer_svc, "get2FAuthenticationStatus", "Feign")
+Rel(trading_svc, catalog_svc, "getAssets, getPortfolio, getCurrentPrices", "Feign")
+Rel(trading_svc, account_svc, "getBrokerAccounts", "Feign")
+Rel(management_svc, catalog_svc, "changePortfolio, getAllPortfolios", "Feign")
+Rel(management_svc, financial_svc, "getTransactionsByCustomerId", "Feign")
+Rel(customercare_svc, document_svc, "generateDocument", "Feign")
+Rel(customercare_svc, customer_svc, "getCustomer", "Feign")
+Rel(customercare_svc, account_svc, "getBrokerAccounts", "Feign")
+Rel(tax_svc, account_svc, "taxWithdraw", "Feign")
+
+@enduml

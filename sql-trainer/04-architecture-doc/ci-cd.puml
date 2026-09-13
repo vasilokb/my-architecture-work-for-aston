@@ -1,0 +1,64 @@
+@startuml SQLTrainer_Deployment_CICD
+skinparam monochrome true
+skinparam linetype ortho
+
+' === Actors ===
+actor Dev as DEV
+actor DevOps as DEVOPS
+actor "User\n(Стажёр / Методист / Админ)" as USER
+
+' === CI/CD зона ===
+node "CI/CD Zone" as CICD {
+  node "GitHub\n(sql-trainer-frontend,\nsql-trainer-backend)" as GITHUB
+  node "Jenkins\nCI/CD Server" as JENKINS
+  node "Nexus\nDocker Registry" as NEXUS
+}
+
+' === Корпоративная инфраструктура Hetzner ===
+rectangle "Hetzner - Internal Infrastructure" as HETZNER {
+
+  ' --- Прод окружение приложения ---
+  node "Prod - Application Server\nsqltrainer.company.local" as APP_SERVER {
+    node "Docker Host" as DOCKER {
+      component "SQL Trainer\nFrontend (React SPA)\n:80" as FE
+      component "SQL Trainer\nBackend (Java + Spring)\n:8090" as BE
+    }
+  }
+
+  node "Reverse NGINX\n(+ API Gateway logic)\n10.10.15.2" as NGINX
+
+  database "App DB\nPostgreSQL\n10.10.15.11:5432" as APPDB
+  database "Training DB\nPostgreSQL\n10.10.15.12:5432" as TRAINDB
+}
+
+' === SSO зона ===
+node "Corporate SSO Zone" as SSOZONE {
+  node "Keycloak / SSO" as KEYCLOAK
+  node "Active Directory" as AD
+}
+
+' === VPN периметр ===
+cloud "TLS/SSL VPN" as VPN
+
+' === CI/CD потоки ===
+DEV #..# GITHUB : push/pull\nsource code
+GITHUB #..# JENKINS : webhook / git pull
+JENKINS #..# NEXUS : push Docker images
+JENKINS #..# APP_SERVER : deploy images\n(SSH/agent, k8s, etc.)
+DEVOPS #..# JENKINS : manage\npipelines
+DEVOPS #..# NGINX : manage\nconfigs
+DEVOPS #..# APP_SERVER : ops / troubleshooting
+
+' === Рабочий трафик пользователей ===
+USER #..# VPN : TLS/SSL\ncorporate access
+VPN #--# NGINX : HTTPS 443\nsqltrainer.company.local
+NGINX #--# FE : HTTP 80\nstatic SPA
+NGINX #--# BE : HTTP 8090\n/api
+
+' === Взаимодействие backend-а ===
+BE #--# APPDB : JDBC 5432\nservice data
+BE #--# TRAINDB : JDBC 5432\ntraining data
+BE #--# KEYCLOAK : HTTPS\nOIDC/OAuth2
+KEYCLOAK #--# AD : LDAP/LDAPS\nuser directory
+
+@enduml

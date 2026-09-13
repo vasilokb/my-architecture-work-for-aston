@@ -1,0 +1,134 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(client, "External Client", "Web / Mobile / Partner systems")
+
+System_Boundary(mycare, "MyCare Insurance Platform (java)") {
+
+  Boundary(entry, "Entry Point") {
+    Container(api_gateway, "api-gateway", "Spring Boot", "Единая точка входа")
+  }
+
+  Boundary(services, "Business Services (java/services)") {
+    Container(auto_insurance, "auto-insurance", "Spring Boot", "Автострахование")
+    Container(aviation_service, "aviation-service", "Spring Boot", "Авиационное страхование")
+    Container(client_service, "client-service", "Spring Boot", "Клиенты")
+    Container(dms_insurance, "dms-insurance", "Spring Boot", "ДМС")
+    Container(employee_service, "employee-service", "Spring Boot", "Сотрудники")
+    Container(info_service, "info-service-new", "Spring Boot", "Новости/контент")
+    Container(notification_service, "notification-service", "Spring Boot", "Уведомления")
+    Container(promo_service, "promo-service", "Spring Boot", "Промо")
+    Container(property_insurance, "property-insurance", "Spring Boot", "Имущественное страхование")
+    Container(property_service, "property-service", "Spring Boot", "Имущество")
+    Container(risks_service, "risks-service", "Spring Boot", "Риски")
+    Container(storage_service, "storage-service", "Spring Boot", "Хранилище")
+    Container(travel_insurance, "travel-insurance", "Spring Boot", "Туристическое страхование")
+    Container(user_service, "user-service", "Spring Boot", "Пользователи")
+  }
+
+  Boundary(platform, "Runtime Infrastructure (java/infra/infra/my-care)") {
+    Container(discovery, "eureka-server", "Spring Boot", "Service discovery")
+    Container(auth, "keycloak", "Keycloak", "Authentication")
+
+    ContainerQueue(rabbitmq, "RabbitMQ", "Message Broker")
+    ContainerQueue(kafka, "Kafka", "Event Broker")
+
+    ContainerDb(postgres, "PostgreSQL", "Database", "Сервисные БД (per-service)")
+    ContainerDb(mongo, "MongoDB", "Database", "Документы")
+    ContainerDb(redis, "Redis", "Cache")
+    Container(zipkin, "Zipkin", "Tracing")
+    Container(minio, "MinIO", "Object Storage")
+  }
+}
+
+' =====================================================
+' Client → Gateway
+' =====================================================
+Rel(client, api_gateway, "Uses", "HTTPS")
+
+' =====================================================
+' Gateway → бизнес-сервисы
+' =====================================================
+Rel(api_gateway, auto_insurance, "Routes")
+Rel(api_gateway, aviation_service, "Routes")
+Rel(api_gateway, client_service, "Routes")
+Rel(api_gateway, dms_insurance, "Routes")
+Rel(api_gateway, employee_service, "Routes")
+Rel(api_gateway, info_service, "Routes")
+Rel(api_gateway, notification_service, "Routes")
+Rel(api_gateway, promo_service, "Routes")
+Rel(api_gateway, property_insurance, "Routes")
+Rel(api_gateway, property_service, "Routes")
+Rel(api_gateway, risks_service, "Routes")
+Rel(api_gateway, storage_service, "Routes")
+Rel(api_gateway, travel_insurance, "Routes")
+Rel(api_gateway, user_service, "Routes")
+
+' =====================================================
+' Service discovery & auth
+' =====================================================
+Rel(api_gateway, discovery, "Service discovery")
+Rel(api_gateway, auth, "Token validation")
+
+Rel(auto_insurance, discovery, "Registers")
+Rel(aviation_service, discovery, "Registers")
+Rel(client_service, discovery, "Registers")
+Rel(dms_insurance, discovery, "Registers")
+Rel(employee_service, discovery, "Registers")
+Rel(info_service, discovery, "Registers")
+Rel(notification_service, discovery, "Registers")
+Rel(promo_service, discovery, "Registers")
+Rel(property_insurance, discovery, "Registers")
+Rel(property_service, discovery, "Registers")
+Rel(risks_service, discovery, "Registers")
+Rel(storage_service, discovery, "Registers")
+Rel(travel_insurance, discovery, "Registers")
+Rel(user_service, discovery, "Registers")
+
+' =====================================================
+' Storage & data
+' =====================================================
+Rel(auto_insurance, postgres, "Stores data")
+Rel(aviation_service, postgres, "Stores data")
+Rel(client_service, postgres, "Stores data")
+Rel(dms_insurance, postgres, "Stores data")
+Rel(employee_service, postgres, "Stores data")
+Rel(notification_service, postgres, "Stores data")
+Rel(promo_service, postgres, "Stores data")
+Rel(property_service, postgres, "Stores data")
+Rel(risks_service, postgres, "Stores data")
+Rel(travel_insurance, postgres, "Stores data")
+Rel(user_service, postgres, "Stores data")
+
+Rel(info_service, mongo, "Stores documents")
+Rel(storage_service, minio, "Stores files")
+
+Rel(client_service, redis, "Cache")
+Rel(user_service, redis, "Cache")
+Rel(info_service, redis, "Cache")
+
+' =====================================================
+' Messaging & tracing
+' =====================================================
+Rel(notification_service, rabbitmq, "Async notifications")
+Rel(auto_insurance, kafka, "Domain events")
+Rel(property_insurance, kafka, "Domain events")
+Rel(travel_insurance, kafka, "Domain events")
+
+Rel(auto_insurance, zipkin, "Tracing")
+Rel(aviation_service, zipkin, "Tracing")
+Rel(client_service, zipkin, "Tracing")
+Rel(dms_insurance, zipkin, "Tracing")
+Rel(employee_service, zipkin, "Tracing")
+Rel(info_service, zipkin, "Tracing")
+Rel(notification_service, zipkin, "Tracing")
+Rel(promo_service, zipkin, "Tracing")
+Rel(property_insurance, zipkin, "Tracing")
+Rel(property_service, zipkin, "Tracing")
+Rel(risks_service, zipkin, "Tracing")
+Rel(storage_service, zipkin, "Tracing")
+Rel(travel_insurance, zipkin, "Tracing")
+Rel(user_service, zipkin, "Tracing")
+
+SHOW_LEGEND()
+@enduml

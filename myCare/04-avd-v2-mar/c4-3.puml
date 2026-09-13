@@ -1,0 +1,137 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 40
+skinparam ranksep 40
+skinparam backgroundColor transparent
+
+' --- Персоны ---
+Person(client, "Клиент", "Покупает страховые полисы через ЛК")
+Person(agent, "Агент", "Оформляет полисы для клиентов (CRM)")
+Person(admin, "Администратор", "Управление системой и пользователями")
+
+' --- Внешние системы ---
+System_Ext(credit_bureaus, "Кредитные бюро", "Скоринг и проверка клиентов")
+System_Ext(payment_gateways, "Платежные шлюзы", "Обработка платежей")
+
+System_Boundary(target, "My Care Insurance (Cloud)") {
+
+    ' --- Публичная зона UI ---
+    System_Boundary(ui_zone, "Public UI Zone") {
+        Container(web_ui, "Web UI (Public)", "React/Next.js", "Личный кабинет клиента и агента")
+        Container(admin_ui, "Admin Web UI", "React", "Панель управления системой")
+    }
+
+    ' --- Слой доступа и безопасности ---
+    System_Boundary(access_zone, "Access & Auth Zone") {
+        Container(api_gw, "API Gateway", "Spring Cloud Gateway", "Единая точка входа, маршрутизация")
+        Container(keycloak, "Keycloak", "Java", "Аутентификация и управление ролями")
+        Container(pdp, "PDP Service", "Java/Spring Boot", "Policy Decision Point (RBAC/ABAC)")
+
+        ' Хранилища доступа
+        ContainerDb(policy_db, "Policy DB", "PostgreSQL", "Политики доступа (только для PDP)")
+        ContainerDb(redis_cache, "Shared Cache", "Redis", "Кэш сессий Keycloak и решений PDP")
+        ContainerDb(keycloak_db, "Keycloak DB", "PostgreSQL", "Пользователи, роли, сессии")
+    }
+
+    ' --- Зона доменных сервисов ---
+    System_Boundary(domain_zone, "Application Zone") {
+        ' Ядро страхования
+        Container(app_svc, "Application Service", "Java/Spring Boot", "Управление заявками на страхование")
+        Container(underwriting_svc, "Underwriting Service", "Java/Spring Boot", "Оценка рисков и андеррайтинг")
+        Container(policy_svc, "Policy Service", "Java/Spring Boot", "Управление полисами (жизненный цикл)")
+        Container(claim_svc, "Claim Service", "Java/Spring Boot", "Урегулирование убытков")
+
+        ' Каталог и продукты
+        Container(catalog_svc, "Catalog Service", "Java/Spring Boot", "Каталог продуктов и тарифов")
+        Container(product_details_svc, "Product Details Service", "Java/Spring Boot", "Детали объектов страхования")
+
+        ' Мастер-данные
+        Container(client_svc, "Client Service", "Java/Spring Boot", "Управление данными клиентов")
+        Container(employee_svc, "Employee Service", "Java/Spring Boot", "Управление сотрудниками и правами")
+
+        ' Поддерживающие сервисы
+        Container(payment_svc, "Payment Service", "Java/Spring Boot", "Обработка платежей")
+        Container(document_svc, "Document Service", "Java/Spring Boot", "Генерация документов (полисы, счета)")
+        Container(storage_svc, "Storage Service", "Java/Spring Boot", "Хранение файлов и документов")
+        Container(notification_svc, "Notification Service", "Java/Spring Boot", "Отправка уведомлений")
+    }
+
+    ' --- Зона данных и событий ---
+    System_Boundary(data_zone, "Data & Events Zone") {
+        ContainerDb(core_db_primary, "Core DB (Primary)", "PostgreSQL", "Основная база данных для доменных сервисов")
+        ContainerDb(core_db_replica, "Core DB (Replica)", "PostgreSQL", "Read-реплика для запросов")
+
+        Container(msg_broker, "Message Broker", "Kafka", "Шина событий для асинхронной коммуникации")
+        ContainerDb(object_storage, "Object Storage", "S3/MinIO", "Хранение файлов и документов")
+    }
+
+    ' --- Зона аудита и мониторинга ---
+    System_Boundary(audit_zone, "Audit & Monitoring Zone") {
+        Container(audit_svc, "Audit Service", "Java/Spring Boot", "Сбор событий аудита")
+        Container(monitoring_svc, "Monitoring Service", "Prometheus/Grafana", "Сбор метрик и дашборды")
+        Container(tracing_svc, "Tracing Service", "Zipkin", "Распределенная трассировка")
+        ContainerDb(audit_store, "Audit Store", "Elasticsearch", "Хранилище логов и событий аудита")
+    }
+}
+
+' --- Связи: Пользователи и UI ---
+Rel(client, web_ui, "HTTPS", "Личный кабинет")
+Rel(agent, web_ui, "HTTPS", "Рабочее место агента")
+Rel(admin, admin_ui, "HTTPS (VPN)", "Администрирование")
+Rel(web_ui, api_gw, "API вызовы", "HTTPS/JSON")
+Rel(web_ui, keycloak, "Логин", "OIDC")
+Rel(admin_ui, api_gw, "API вызовы", "HTTPS/JSON")
+
+' --- Связи: Access & Auth Zone ---
+Rel(api_gw, keycloak, "Валидация токенов", "JWKS/OIDC")
+Rel(api_gw, pdp, "Проверка доступа", "HTTP/REST")
+Rel(keycloak, redis_cache, "Хранение сессий", "Redis Protocol")
+Rel(pdp, redis_cache, "Кэш решений", "Redis Protocol")
+Rel(pdp, policy_db, "Чтение политик", "SQL")
+Rel(keycloak, keycloak_db, "Хранение пользователей и ролей", "SQL")
+
+' --- Связи: Доменные сервисы (через API Gateway) ---
+Rel(api_gw, app_svc, "HTTP", "Заявки")
+Rel(api_gw, policy_svc, "HTTP", "Полисы")
+Rel(api_gw, claim_svc, "HTTP", "Убытки")
+Rel(api_gw, catalog_svc, "HTTP", "Каталог продуктов")
+Rel(api_gw, client_svc, "HTTP", "Клиенты")
+Rel(api_gw, payment_svc, "HTTP", "Платежи")
+
+' --- Связи: Внутри доменной зоны (синхронные вызовы) ---
+Rel(app_svc, underwriting_svc, "HTTP", "Оценка риска")
+Rel(app_svc, catalog_svc, "HTTP", "Получение тарифов")
+Rel(underwriting_svc, credit_bureaus, "HTTP", "Проверка скоринга")
+Rel(claim_svc, policy_svc, "HTTP", "Проверка покрытия")
+Rel(claim_svc, payment_svc, "HTTP", "Инициация выплаты")
+Rel(payment_svc, payment_gateways, "HTTP", "Обработка транзакций")
+
+' --- Связи: Внутри доменной зоны (через события) ---
+Rel(app_svc, msg_broker, "События", "Kafka")
+Rel(policy_svc, msg_broker, "События", "Kafka")
+Rel(claim_svc, msg_broker, "События", "Kafka")
+Rel(payment_svc, msg_broker, "События", "Kafka")
+Rel(msg_broker, notification_svc, "События", "Kafka")
+Rel(msg_broker, audit_svc, "События аудита", "Kafka")
+
+' --- Связи: Данные ---
+Rel(app_svc, core_db_primary, "Запись данных", "SQL")
+Rel(policy_svc, core_db_primary, "Запись данных", "SQL")
+Rel(claim_svc, core_db_primary, "Запись данных", "SQL")
+Rel(client_svc, core_db_primary, "Запись данных", "SQL")
+Rel(core_db_primary, core_db_replica, "Репликация", "Streaming")
+
+Rel(document_svc, storage_svc, "Сохранение документов", "HTTP")
+Rel(storage_svc, object_storage, "Хранение файлов", "S3 API")
+
+' --- Связи: Аудит и мониторинг ---
+Rel(api_gw, audit_svc, "Логи доступа", "HTTP")
+Rel(api_gw, monitoring_svc, "Метрики", "HTTP")
+Rel(api_gw, tracing_svc, "Трассировка", "HTTP")
+Rel(audit_svc, audit_store, "Индексация логов", "Elasticsearch API")
+
+@enduml

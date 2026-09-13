@@ -1,0 +1,98 @@
+﻿@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title MVP ABS (Gateway API + Service Mesh + OPA + CQRS + Security)
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam ranksep 80
+
+Person(client_user, "Client", "Individual / Legal entity")
+Person(backoffice_user, "Bank Employee", "Operator, Accountant, Manager (через UI банка)")
+Person(bank_admin, "Bank Admin", "bank_admin (владелец банка, через UI админки)")
+Person(platform_admin, "Platform Admin", "Менеджер платформы, через Admin UI")
+
+System_Boundary(abs_mvp, "MVP ABS Ecosystem") {
+
+    ' Edge Layer
+    Boundary(ingress_layer, "Edge Layer") {
+        Container(kong_gw, "API Gateway (Kong)", "Kong OSS + custom Lua plugin", "Entry point: JWT validation (JWKS from Redis), blacklist in Redis, OPA authz check, tenant_id extraction, proxying")
+    }
+
+    ' Security Layer
+    Boundary(security_layer, "Security Layer") {
+        Container(opa, "OPA (PDP)", "Open Policy Agent", "Authorization decisions по Rego-политике abs.rbac.authz и data.json bundle (in-memory)")
+        Container(opa_bundle, "OPA Bundle Server", "Java / Spring Boot", "Сборка data.json из admin_db, push в OPA. Sync trigger от Admin Service + cron-джоб раз в 5 мин (fallback)")
+        Container(keycloak, "Keycloak", "Keycloak (realm: abs)", "IdP: выпуск JWT, аутентификация. Keycloak Admin API для IAM CRUD. Service-account 'admin-service' (client_credentials)")
+    }
+
+    ' Core Mesh Layer
+    Boundary(mesh_layer, "Service Mesh (Istio)") {
+        Container(txn_svc, "Transaction Service", "Java / Spring Boot", "Orchestration & Write operations")
+        Container(client_svc, "Client Service", "Java / Spring Boot", "CIF Management")
+        Container(account_svc, "Account Service", "Java / Spring Boot", "Balances & Core Ledger")
+        Container(audit_svc, "Audit Service", "Java / Spring Boot", "Centralized audit log storage")
+        Container(cqrs_svc, "CQRS Read Service", "Java / Spring Boot", "High-performance data retrieval")
+        Container(admin_svc, "Admin Service", "Java / Spring Boot", "IAM CRUD: тенанты, роли, сотрудники, биллинг. Service-account в Keycloak (client_credentials). Sync trigger в OPA Bundle Server при изменении ролей")
+    }
+
+    ' Data Layer
+    Boundary(data_layer, "Data Layer") {
+        ContainerDb(pg_master, "PostgreSQL (Master)", "Shared Schema + RLS", "Write Operations, business data + RLS по tenant_id (последний рубеж защиты)")
+        ContainerDb(pg_replica, "PostgreSQL (Replica)", "Shared Schema + RLS", "Read-only Replica")
+        ContainerDb(admin_db, "admin_db", "PostgreSQL (отдельная БД)", "role_permissions (роль → allowed_methods), tenant_keycloak_clients (tenant_id → client_uuid). Логически отделена от бизнес-данных")
+        ContainerDb(redis, "Redis", "Redis 7", "Blacklist (TTL 1 час для user, без TTL для tenant) + JWKS cache (TTL 5 мин)")
+        ContainerDb(audit_db, "Audit Storage", "ClickHouse / PostgreSQL", "Immutable audit logs")
+    }
+}
+
+' Внешние связи
+Rel(client_user, kong_gw, "HTTPS / REST", "Bearer JWT")
+Rel(backoffice_user, kong_gw, "HTTPS / REST", "Bearer JWT")
+Rel(bank_admin, kong_gw, "HTTPS / REST", "Bearer JWT")
+Rel(platform_admin, kong_gw, "HTTPS / REST", "Bearer JWT")
+
+' Логин (Kong НЕ участвует)
+Rel_R(backoffice_user, keycloak, "POST /realms/abs/.../token", "login → JWT")
+Rel_R(bank_admin, keycloak, "login → JWT")
+
+' Kong: аутентификация + авторизация
+Rel(kong_gw, redis, "EXISTS blacklist:user, blacklist:tenant", "Lua plugin")
+Rel(kong_gw, redis, "GET JWKS", "TTL 5 мин, lazy refresh")
+Rel(kong_gw, opa, "POST /v1/data/abs.rbac.authz/allow", "input: tenant_id, roles, method, path")
+
+' Потоки данных (Write Path)
+Rel(kong_gw, txn_svc, "Execute Posting", "REST + mTLS")
+Rel(txn_svc, pg_master, "Write Postings")
+Rel(txn_svc, audit_svc, "Send Audit Log", "Async / mTLS")
+
+' Потоки данных (Read Path / CQRS)
+Rel(kong_gw, cqrs_svc, "Get Account Statement", "REST + mTLS")
+Rel(cqrs_svc, pg_replica, "Read Data")
+
+' IAM: Admin Service обрабатывает запросы от bank_admin и platform_admin
+Rel(kong_gw, admin_svc, "IAM operations\n(тенанты, роли, сотрудники, биллинг)", "REST + mTLS")
+
+' Внутренняя оркестрация
+Rel(txn_svc, account_svc, "Modify Balance", "mTLS")
+Rel(txn_svc, client_svc, "Validate KYC", "mTLS")
+
+' Все сервисы пишут в аудит
+Rel(account_svc, audit_svc, "Audit Event", "mTLS")
+Rel(client_svc, audit_svc, "Audit Event", "mTLS")
+Rel(audit_svc, audit_db, "Store Log")
+
+' Kong пишет auth-аудит (allow/deny + контекст) — async в Kafka
+Rel(kong_gw, audit_svc, "Auth decision audit\n(allow/deny + tenant + user + method + path)", "Kafka topic: auth-audit, async")
+
+' Admin Service ↔ Keycloak + admin_db + OPA Bundle Server
+Rel(admin_svc, keycloak, "Keycloak Admin API", "client_credentials, service-account")
+Rel(admin_svc, admin_db, "CRUD role_permissions, tenant_keycloak_clients", "SQL")
+Rel(admin_svc, opa_bundle, "POST /internal/v1/bundle/trigger", "sync (при изменении ролей)")
+Rel(opa_bundle, admin_db, "SELECT role_permissions", "для data.json")
+Rel(opa_bundle, opa, "PUT /v1/policies/bundle", "data.json + Rego")
+
+' Синхронизация БД
+Rel_D(pg_master, pg_replica, "Streaming Replication")
+
+@enduml

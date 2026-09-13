@@ -1,0 +1,34 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+LAYOUT_LEFT_RIGHT()
+title SQL Execution Subsystem (Component level)
+
+Container_Boundary(exec, "Execution Namespace") {
+  Component(api, "Exec API Adapter", "HTTP", "Принимает задания от BFF, нормализует SQL/параметры, ставит в очередь")
+  Component(ratelim, "Per-User RateLimiter", "Redis", "Лимиты RPS/Concurrency, защита от 'штурма' кнопки")
+  Component(q, "Job Queue", "Redis/Rabbit", "FIFO/приоритеты, повторные попытки")
+  Component(sched, "Scheduler", "Worker", "Вытягивает задания, выбирает целевой пул")
+  Component(pool, "Pool Manager", "Service", "Управляет пулами контейнеров MySQL/Postgres/SQLite")
+  Component(worker, "SQL Runner", "Sidecar/Container", "Выполняет запрос, ограничивает CPU/RAM/timeout, KILL long query")
+  Component(sanit, "SQL Sanitizer", "Lib", "Deny-list DDL/DCL, ограничение SELECT, запрет multiple statements")
+  Component(res, "Result Writer", "Lib", "Стрим/пейджинг результатов, обрезка по row limit")
+  Component(grader, "Grader", "Service", "Сравнение с эталоном: exact, set-wise, invariants, time/plan")
+  Component(store, "Exec Logs Store", "Service", "Логи, трассировка, планы, причины kill/timeout")
+}
+
+ContainerDb(datasets, "Datasets (RO)", "MySQL 8.1", "Предзагруженные схемы")
+ContainerDb(etalon, "Etalons", "Postgres", "Ожидаемые результаты/предикаты")
+ContainerDb(pdb, "Progress DB", "Postgres", "Попытки/результаты")
+Rel(api, ratelim, "check & acquire")
+Rel(api, q, "enqueue")
+Rel(sched, q, "dequeue")
+Rel(sched, pool, "assign")
+Rel(pool, worker, "spawn/lease container")
+Rel(worker, sanit, "validate SQL")
+Rel(worker, datasets, "read-only connect")
+Rel(worker, res, "stream rows (limited)")
+Rel(worker, store, "write exec logs")
+Rel(worker, grader, "return result snapshot")
+Rel(grader, etalon, "read expected")
+Rel(grader, pdb, "write attempt/result")
+@enduml

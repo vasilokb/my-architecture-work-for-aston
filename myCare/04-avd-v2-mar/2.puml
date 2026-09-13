@@ -1,0 +1,44 @@
+@startuml
+title Последовательность авторизации: PEP → PDP
+
+actor "Клиент" as Client
+participant "API Gateway" as Gateway
+participant "PDP Service" as PDP
+database "Policy DB" as PolicyDB
+database "Redis" as Redis
+participant "Policy Service" as PolicyService
+
+Client -> Gateway: GET /api/policies/1234\nAuthorization: Bearer <JWT>
+
+Gateway -> Gateway: 1. Валидация JWT через Keycloak JWKS
+Gateway -> Gateway: 2. Декодирование claims (userId, roles)
+Gateway -> Gateway: 3. Сбор атрибутов запроса
+
+Gateway -> PDP: 4. POST /pdp/decide\n{subject, resource, action, context}
+
+PDP -> Redis: 5. Проверка кэша решений (ключ=hash(запроса))
+alt Кэш найден
+    PDP -> Gateway: Возврат решения из кэша
+else Кэш отсутствует
+    PDP -> PolicyDB: 6. Загрузка политик для ролей
+    PolicyDB -> PDP: Список политик с условиями
+
+    PDP -> PDP: 7. Оценка условий политик\n(подстановка атрибутов)
+
+    PDP -> PolicyDB: 8. Выполнение SQL-условий\nиз политик (при наличии)
+    PolicyDB -> PDP: Результат условий (true/false)
+
+    PDP -> PDP: 9. Принятие решения (PERMIT/DENY)
+    PDP -> Redis: 10. Кэширование решения (TTL=30 сек)
+    PDP -> Gateway: 11. Ответ с решением
+end
+
+Gateway -> Gateway: 12. Применение решения
+alt PERMIT
+    Gateway -> PolicyService: 13. Маршрутизация запроса
+    PolicyService -> Client: 14. Данные полиса
+else DENY
+    Gateway -> Client: 15. 403 Forbidden
+end
+
+@enduml

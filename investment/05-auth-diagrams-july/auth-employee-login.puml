@@ -1,0 +1,110 @@
+@startuml
+title Вход сотрудника — двухфакторная аутентификация (2FA)\nauth-service: /authentication/initiate → /authentication/confirm
+
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign center
+skinparam backgroundColor transparent
+skinparam responseMessageBelowArrow true
+
+actor Сотрудник as U
+participant "Back-office\nпортал" as UI
+participant "API Gateway\n(AuthJwtFilter)" as GW
+participant "AuthFreeController\n(auth-service)" as C
+participant "AuthEventService" as EVT
+participant "AuthVerificationService" as VF
+participant "EmployeeService" as EMP
+participant "CredentialsService" as CR
+participant "EventCodeService" as ECS
+participant "Kafka →\nnotification-service" as K
+participant "AuthTokenService" as TK
+participant "ProcessingTokenUtil\n(jjWT, HS256)" as JWT
+participant "SessionService" as SES
+participant "audit (AuditLog)" as LOG
+database "auth_db\n(PostgreSQL)" as DB
+
+== ФАКТОР 1 — логин + пароль, генерация OTP ==
+
+U -> UI : login + password
+UI -> GW : POST /authentication/initiate\n{login, password}
+GW -> C : проброс запроса\n(маршрут permitAll, без токена)
+C -> EVT : registerEvent(LoginRequest)
+EVT -> VF : checkAttempts(password, login, LOGIN)
+VF -> EMP : getByUsername(login)
+EMP -> DB : SELECT ... WHERE username=?
+VF -> CR : getById(employeeId)
+CR -> DB : SELECT credentials
+note right of VF
+  <b>Анти-брутфорс</b> (CredentialsEntity):
+   failedAttempts < 3 → +1
+   иначе: lockTime = now + 10м
+   при lockTime > now → FrequentAttemptsError
+end note
+VF -> VF : сверка password\n(plaintext ==, без хэша!)
+VF -> EMP : checkStatus(id)
+EMP --> VF : EmployeeModel\n(если isBlocked/isDeleted → ошибка)
+EVT -> CR : getById → isFirstLogin?
+note right of EVT #F4B400
+  isFirstLogin == true → FirstLoginError
+  (требуется первичная смена пароля
+   через /first-login/change-password)
+end note
+EVT -> VF : verify(employee, json, LOGIN)
+VF -> ECS : getByJson(...) — нет ли уже события?
+VF -> JWTcode : generateOtp()  (6 цифр, уникальный)
+VF -> DB : SAVE EventCode\n(codeOtp, json, expiredAt=+1м, countRefresh, timeRefresh=+10м)
+EVT -> K : sendData(security-notification, eventId, {otp, phone/email})
+K -> U : 📩 OTP-код (Push/SMS/Email)
+EVT --> C : SendOtpCodeResponse{eventId, maxCount=3, timeRefresh}
+C --> GW : 200 OK
+GW --> UI : eventId + параметры
+
+== ФАКТОР 2 — подтверждение OTP, выпуск токенов ==
+
+U -> UI : вводит OTP-код
+UI -> GW : POST /authentication/confirm\n{eventId, otpCode}
+GW -> C : проброс запроса
+C -> C : validation.valid(ConfirmRequest)
+C -> TK : login(ConfirmRequest)
+TK -> ECS : checkEvent(eventId, otpCode)
+ECS -> DB : SELECT EventCode by eventId
+note right of ECS
+  Проверки:
+   event == null → EventNotFoundError
+   now > expiredAt(1м) → OtpCodeExpiredError
+   codeOtp != otpCode → OtpCodeVerifyError
+end note
+TK -> EMP : checkStatus(event.employeeId)
+TK -> CR : getById → isFirstLogin? (false OK)
+TK -> ECS : deleteByEventId(eventId)
+TK -> LOG : save(AuditLog, LOGIN)
+TK -> JWT : generateAccessToken(employee)
+note right of JWT
+  <b>JWT claims</b> (subject = JSON):
+   employee_id, user_type="ADMIN-DOMAIN",
+   roles, rights[], exp, iat, jti
+   access TTL = 15м, refresh TTL = 540м
+   подпись HS256(service.jwt.secret.key)
+end note
+TK -> JWT : generateRefreshToken(employee)
+TK -> SES : getById(employeeId)
+alt сессии нет
+  SES -> DB : INSERT Session{accessToken, refreshToken}
+else сессия есть и refresh ещё валиден
+  SES -> DB : UPDATE Session\n(новый access; refresh сохраняется)
+else refresh истёк/отозван
+  SES -> DB : UPDATE Session\n(access + перевыпуск refresh)
+end
+TK --> C : AuthorisationResponse{accessToken, refreshToken}
+C --> GW : 200 OK
+GW --> UI : токены
+UI -> U : вход выполнен, выданы токены
+
+note over U, DB #F4B400
+  <b>Риски (AS-IS):</b>
+   • Пароль сотрудника хранится/сравнивается в открытом виде (нет BCrypt)
+   • JWT-секрет по умолчанию захардкожен: [redacted]
+   • Секрет — симметричный HS256 (любой downstream с секретом может подписывать токены)
+   • Один сотрудник = одна запись Session (нет множественных устройств, нет rotation jti)
+end note
+
+@enduml

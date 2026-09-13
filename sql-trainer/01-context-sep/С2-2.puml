@@ -1,0 +1,81 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+title SQL Trainer — Микросервисная архитектура (React/Java, REST-only)
+
+Person(stu, "Стажёр")
+Person(lead, "Ментор/Тимлид")
+Person(admin, "Администратор")
+
+System_Boundary(app, "SQL Trainer Platform") {
+  ' --- Frontend Layer ---
+  Container(ui, "Web UI", "React/TypeScript", "Тёмная/светлая тема, редактор SQL, таблица результатов")
+  Container(adminui, "Admin UI", "React", "CRUD задач/датасетов")
+
+  ' --- Gateway ---
+  Container(gw, "API Gateway", "Spring Cloud Gateway", "Терминация TLS, маршрутизация, rate-limit")
+
+  ' --- Business Services ---
+  Container(auth, "Identity Service", "Spring Boot", "LDAP (AD) login, JWT, роли")
+  Container(tasks, "Tasks Service", "Spring Boot", "Каталог задач, фильтры, эталонные ответы")
+  Container(schema, "Schema Service", "Spring Boot", "Инспекция структур учебных БД")
+  Container(exec, "Execution Service", "Spring Boot", "Песочница: выполнение SQL")
+  Container(check, "Checking Service", "Spring Boot", "Сравнение результата, подсчёт баллов")
+  Container(progress, "Progress Service", "Spring Boot", "Учёт прогресса, синхронизация с CRM")
+  Container(hints, "Hints Service", "Spring Boot", "Контекстные подсказки")
+
+  ' --- Databases ---
+  ContainerDb(db_tasks, "Tasks DB", "PostgreSQL", "Задачи, метаданные, эталоны")
+  ContainerDb(db_exec, "Exec DB", "PostgreSQL", "Сабмишены, попытки")
+  ContainerDb(db_prog, "Progress DB", "PostgreSQL", "Прогресс, рейтинги")
+    ContainerDb(db_schema, "Schema Snapshot DB", "PostgreSQL",  "Хранение готовых JSON-снимков схем (payload, captured_at, ttl, hash)")
+}
+
+' --- External Systems ---
+System_Ext(ad, "Active Directory", "LDAP/LDAPS")
+System_Ext(crm, "CRM/Trainee System", "REST API")
+System_Ext(trainingdb, "Учебные БД", "PostgreSQL/MySQL/SQLite", "Read-only доступ")
+'Lay_R(hints, progress)
+Lay_R(exec, tasks)
+Lay_R(tasks, schema)
+Lay_R(schema, check)
+' --- Person to Frontend Relations ---
+Rel(stu, ui, "Работа с заданиями", "HTTPS")
+Rel(lead, ui, "Просмотр прогресса", "HTTPS")
+Rel(admin, adminui, "Администрирование", "HTTPS")
+
+' --- Frontend to Gateway ---
+Rel(ui, gw, "API Calls", "HTTPS")
+Rel(adminui, gw, "API Calls", "HTTPS")
+
+' --- Gateway to Internal Services ---
+Rel_R(gw, auth, "Аутентификация", "REST")
+Rel_D(gw, tasks, "Получение задач", "REST")
+Rel_D(gw, schema, "Получение схемы", "REST")
+Rel_D(gw, exec, "Выполнение SQL", "REST")
+Rel_D(gw, check, "Проверка решения", "REST")
+Rel_D(gw, progress, "Синхронизация прогресса", "REST")
+Rel_L(gw, hints, "Получение подсказок", "REST")
+
+' --- Service to Database Relations ---
+Rel_D(tasks, db_tasks, "READ/WRITE", "JDBC")
+Rel_D(exec, db_exec, "READ/WRITE", "JDBC")
+Rel_D(progress, db_prog, "READ/WRITE", "JDBC")
+Rel_D(schema, db_schema, "READ/WRITE", "JDBC (кеш снимков)")
+
+' --- Service to External System Relations ---
+Rel_R(auth, ad, "Проверка учетных данных", "LDAPS")
+Rel_L(exec, trainingdb, "Выполнение SQL", "JDBC")
+Rel_R(progress, crm, "Отправка прогресса", "HTTPS")
+
+' --- Service ↔ Service (внутренние REST-контракты) ---
+'Rel(exec, tasks, "Получить метаданные/правила задачи", "REST")
+'Rel(check, tasks, "Получить эталон/правила сравнения", "REST")
+'Rel(check, exec, "Получить результат сабмишена по submissionId", "REST")
+'Rel(hints, tasks, "Контекст задачи для подсказок", "REST")
+Boundary(note, "Assumptions") {
+  note "Execution/Checking/Hints используют REST-контракты Tasks/Execution.\nКонтракты будут описаны в sequence/OpenAPI." as N
+}
+@enduml

@@ -1,0 +1,83 @@
+﻿@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма (C4 L2) — КЛИЕНТСКАЯ ЧАСТЬ (AS-IS)
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 35
+skinparam ranksep 20
+skinparam backgroundColor transparent
+skinparam ContainerFontSize 11
+skinparam BoundaryFontSize 12
+
+' ЛЕГЕНДА ЦВЕТОВ (AS-IS):
+'   #5B9BD5 = клиентский сервис
+'   #3CB371 = общий (точка входа)
+'   #F4B400 = проблема архитектуры (долг / дыра)
+'   серый   = ссылка на административную часть
+
+Person(клиент, "Клиент\n(Инвестор)", "Торгует, видит портфель")
+
+System_Ext(moex, "MOEX", "Котировки")
+System_Ext(keycloak, "Keycloak (IdP)", "JWT клиентов")
+System_Ext(mail, "Почтовый сервер", "Email + OTP")
+
+' === ИНФРАСТРУКТУРА (общая точка входа) ===
+Boundary(infra, "Инфраструктура") {
+    Container(api_gw, "API Gateway", "Spring Cloud Gateway WebFlux", "Единая точка входа.\nPEP по факту: JwtFilter (Keycloak) проверяет токен клиента на маршруте.\nТОЛЬКО аутентификация, НЕ авторизация уровня операций") #3CB371
+}
+
+' === КЛИЕНТСКАЯ ЧАСТЬ AS-IS ===
+Boundary(client_part, "Клиентская часть (ядро учёта)") {
+    Container(react_app, "React SPA", "React 18, Vite, RTK Query", "Клиентское инвестиционное приложение") #5B9BD5
+
+    Container(account_svc, "account-service", "Spring Boot 3.5.0", "Брокерские/депо/маржинальные счета, активы, история операций\nБез method-level security") #5B9BD5
+
+    Container(catalog_svc, "catalog-service", "Spring Boot 3.5.0", "Каталог инструментов, котировки, портфели, избранное\nБез method-level security") #5B9BD5
+
+    Container(customer_svc, "customer-service", "Spring Boot 3.5.0", "Профиль клиента, рефералы +\nauth/registration/2FA/refresh/forgot-password\n⚠ ПРОБЛЕМА: смешивает профиль и безопасность — долг.\nНет выделенного identity-сервиса клиента") #F4B400
+
+    Container(document_svc, "document-service", "Spring Boot 3.5.0", "PDF, 2-НДФЛ\nБез method-level security") #5B9BD5
+
+    Container(emulator_svc, "emulator-service", "Kotlin + Spring Boot", "Эмулятор биржи, обработка ордеров") #5B9BD5
+
+    Container(notification_svc, "notification-service", "Spring Boot 3.5.0", "Push/SSE/Email") #5B9BD5
+
+    Container(otp_svc, "otp-service", "Spring Boot 3.5.0", "Генерация/валидация OTP (security-функция, но стоит среди клиентских сервисов)") #5B9BD5
+
+    Container(trading_svc, "trading-service", "Spring Boot 3.5.0", "Ордера, портфели, комиссии, Outbox\n⚠ ПРОБЛЕМА: физически в backend/, по требованиям — клиентский") #F4B400
+}
+
+' === ССЫЛКА НА административную часть ===
+System_Ext(admin_part, "административная часть\n(см. c2-admin-containers.puml)", "education, management-service-pb,\ntax, financialtransactions —\nпоставляют read-данные")
+
+' === СВЯЗИ ===
+Rel(клиент, react_app, "HTTPS / WebSocket", "Торгует")
+Rel(react_app, api_gw, "REST + SSE", "HTTPS")
+
+Rel(api_gw, account_svc, "", "REST")
+Rel(api_gw, catalog_svc, "", "REST")
+Rel(api_gw, customer_svc, "", "REST")
+Rel(api_gw, document_svc, "", "REST")
+Rel(api_gw, emulator_svc, "", "REST")
+Rel(api_gw, notification_svc, "", "REST")
+Rel(api_gw, otp_svc, "", "REST")
+Rel(api_gw, trading_svc, "", "REST")
+
+Rel(api_gw, keycloak, "Token introspection", "HTTPS")
+Rel(emulator_svc, moex, "Котировки", "HTTPS/Feign")
+Rel(notification_svc, mail, "Email", "SMTP")
+Rel(customer_svc, otp_svc, "verify OTP", "Feign")
+
+Rel(catalog_svc, admin_part, "Готовые портфели, курсы (read)", "REST/Feign")
+Rel(trading_svc, admin_part, "Каталог комиссий (read)", "Feign")
+
+legend right
+  |= Цвет |= Значение |
+  |<back:#5B9BD5>   </back>| Клиентский сервис (без method-level security) |
+  |<back:#3CB371>   </back>| Общая точка входа (Gateway = PEP по факту) |
+  |<back:#F4B400>   </back>| Проблема архитектуры (долг / смешение) |
+endlegend
+
+@enduml

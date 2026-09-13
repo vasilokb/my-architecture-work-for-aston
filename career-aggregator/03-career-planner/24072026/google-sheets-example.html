@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Google Sheets — вакансии из HH</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f0f0; padding: 20px; }
+  h2 { margin-bottom: 6px; }
+  .hint { color: #666; font-size: 13px; margin-bottom: 16px; }
+
+  .sheet {
+    border: 1px solid #c0c0c0;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #fff;
+    max-width: 1200px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  }
+  .sheet-bar {
+    background: #1a73e8;
+    color: #fff;
+    padding: 8px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sheet-bar .tab {
+    background: #fff;
+    color: #1a73e8;
+    padding: 3px 14px;
+    border-radius: 3px 3px 0 0;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; white-space: nowrap; }
+  th { background: #f8f9fa; font-weight: 600; position: sticky; top: 0; }
+  td { color: #333; }
+  td.skills { color: #1a73e8; white-space: normal; max-width: 320px; }
+  td.title { font-weight: 600; }
+  td.salary { font-variant-numeric: tabular-nums; }
+
+  .row-num {
+    background: #f8f9fa;
+    color: #999;
+    font-size: 11px;
+    text-align: center;
+    width: 36px;
+  }
+  .col-letter {
+    background: #f8f9fa;
+    color: #999;
+    font-size: 11px;
+    text-align: center;
+    width: 36px;
+  }
+
+  .highlight-col { background: #fff3cd; }
+  .highlight-col th { background: #ffe082; }
+</style>
+</head>
+<body>
+
+<h2>Таблица вакансий в Google Sheets</h2>
+<div class="hint">Так должна выглядеть таблица, которую лабпроект Астона выгружает из HH раз в день. Каждая строка — одна вакансия. Жёлтым выделена колонка key_skills — она главная для матчинга.</div>
+
+<div class="sheet">
+  <div class="sheet-bar">
+    vacancies
+    <span class="tab">Лист1</span>
+  </div>
+  <table>
+    <tr>
+      <th class="col-letter">A</th>
+      <th>id</th>
+      <th>title</th>
+      <th>company</th>
+      <th>salary_from</th>
+      <th>salary_to</th>
+      <th>key_skills</th>
+      <th>experience</th>
+      <th>area</th>
+      <th>employment</th>
+      <th>url</th>
+    </tr>
+    <tr>
+      <td class="row-num">1</td>
+      <td>49123871</td>
+      <td class="title">Backend Python-разработчик</td>
+      <td>Т-Банк</td>
+      <td class="salary">350000</td>
+      <td class="salary">450000</td>
+      <td class="skills">Python; PostgreSQL; FastAPI; Docker; Redis</td>
+      <td>3-6 лет</td>
+      <td>Москва</td>
+      <td>Удалёнка</td>
+      <td><a href="#">hh.ru/vacancy/49123871</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">2</td>
+      <td>49123872</td>
+      <td class="title">Senior Data Engineer</td>
+      <td>Авито</td>
+      <td class="salary">300000</td>
+      <td class="salary">400000</td>
+      <td class="skills">Python; SQL; Airflow; Spark; ClickHouse</td>
+      <td>3-6 лет</td>
+      <td>Москва</td>
+      <td>Гибрид</td>
+      <td><a href="#">hh.ru/vacancy/49123872</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">3</td>
+      <td>49123873</td>
+      <td class="title">Python Developer</td>
+      <td>Яндекс</td>
+      <td class="salary">250000</td>
+      <td class="salary">350000</td>
+      <td class="skills">Python; SQL; PostgreSQL; Docker; Java</td>
+      <td>1-3 года</td>
+      <td>Москва</td>
+      <td>Офис</td>
+      <td><a href="#">hh.ru/vacancy/49123873</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">4</td>
+      <td>49123874</td>
+      <td class="title">Fullstack разработчик</td>
+      <td>Ozon</td>
+      <td class="salary">200000</td>
+      <td class="salary">300000</td>
+      <td class="skills">Python; Docker; PostgreSQL; React; TypeScript</td>
+      <td>3-6 лет</td>
+      <td>Санкт-Петербург</td>
+      <td>Удалёнка</td>
+      <td><a href="#">hh.ru/vacancy/49123874</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">5</td>
+      <td>49123875</td>
+      <td class="title">DevOps инженер</td>
+      <td>Сбер</td>
+      <td class="salary">280000</td>
+      <td class="salary">380000</td>
+      <td class="skills">Docker; Linux; Ansible; Terraform; Kubernetes</td>
+      <td>3-6 лет</td>
+      <td>Москва</td>
+      <td>Гибрид</td>
+      <td><a href="#">hh.ru/vacancy/49123875</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">6</td>
+      <td>49123876</td>
+      <td class="title">Data Scientist</td>
+      <td>ВКонтакте</td>
+      <td class="salary">320000</td>
+      <td class="salary">420000</td>
+      <td class="skills">Python; SQL; pandas; scikit-learn; TensorFlow</td>
+      <td>3-6 лет</td>
+      <td>Санкт-Петербург</td>
+      <td>Гибрид</td>
+      <td><a href="#">hh.ru/vacancy/49123876</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">7</td>
+      <td>49123877</td>
+      <td class="title">QA Automation Engineer</td>
+      <td>Тинькофф</td>
+      <td class="salary">220000</td>
+      <td class="salary">300000</td>
+      <td class="skills">Python; pytest; Selenium; REST API; Docker</td>
+      <td>1-3 года</td>
+      <td>Москва</td>
+      <td>Удалёнка</td>
+      <td><a href="#">hh.ru/vacancy/49123877</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">8</td>
+      <td>49123878</td>
+      <td class="title">ML Engineer</td>
+      <td>МТС</td>
+      <td class="salary">300000</td>
+      <td class="salary">400000</td>
+      <td class="skills">Python; PyTorch; SQL; Kubernetes; Airflow</td>
+      <td>3-6 лет</td>
+      <td>Москва</td>
+      <td>Офис</td>
+      <td><a href="#">hh.ru/vacancy/49123878</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">9</td>
+      <td>49123879</td>
+      <td class="title">Java Backend Developer</td>
+      <td>Альфа-Банк</td>
+      <td class="salary">280000</td>
+      <td class="salary">380000</td>
+      <td class="skills">Java; Spring; PostgreSQL; Kafka; Docker</td>
+      <td>3-6 лет</td>
+      <td>Москва</td>
+      <td>Гибрид</td>
+      <td><a href="#">hh.ru/vacancy/49123879</a></td>
+    </tr>
+    <tr>
+      <td class="row-num">10</td>
+      <td>49123880</td>
+      <td class="title">Go разработчик</td>
+      <td>Авито</td>
+      <td class="salary">350000</td>
+      <td class="salary">500000</td>
+      <td class="skills">Go; PostgreSQL; gRPC; Kubernetes; Redis</td>
+      <td>3-6 лет</td>
+      <td>Москва</td>
+      <td>Офис</td>
+      <td><a href="#">hh.ru/vacancy/49123880</a></td>
+    </tr>
+    <tr>
+      <td class="row-num" style="color:#ccc">11</td>
+      <td colspan="10" style="color:#999; text-align:center; font-style:italic;">... и так далее, ~1500-2000 строк ...</td>
+    </tr>
+  </table>
+</div>
+
+<br><br>
+
+<h2>Что использовать, а что нет</h2>
+<div class="hint">Жёлтым отмечена обязательная колонка. Остальное — желательно, карточки без них будут беднее, но работать будут.</div>
+
+<div class="sheet">
+  <table>
+    <tr>
+      <th class="col-letter"></th>
+      <th>Колонка</th>
+      <th>Обязательна?</th>
+      <th>Зачем нужна</th>
+      <th>Пример значения</th>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td class="highlight-col"><b>key_skills</b></td>
+      <td class="highlight-col"><b>ДА — без неё ничего не работает</b></td>
+      <td class="highlight-col">Навыки для матчинга с навыками кандидата. Главные данные.</td>
+      <td class="highlight-col">Python; PostgreSQL; Docker; Redis</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>title</td>
+      <td>да</td>
+      <td>Заголовок карточки</td>
+      <td>Backend Python-разработчик</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>company</td>
+      <td>желательно</td>
+      <td>Название компании в карточке</td>
+      <td>Т-Банк</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>salary_from</td>
+      <td>желательно</td>
+      <td>Зарплата "от"</td>
+      <td>350000</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>salary_to</td>
+      <td>желательно</td>
+      <td>Зарплата "до"</td>
+      <td>450000</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>area</td>
+      <td>желательно</td>
+      <td>Город / удалёнка</td>
+      <td>Москва</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>experience</td>
+      <td>желательно</td>
+      <td>Требуемый опыт</td>
+      <td>3-6 лет</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>employment</td>
+      <td>желательно</td>
+      <td>Формат работы</td>
+      <td>Удалёнка</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>url</td>
+      <td>да</td>
+      <td>Ссылка на вакансию на hh.ru (клик из карточки)</td>
+      <td>hh.ru/vacancy/49123871</td>
+    </tr>
+    <tr>
+      <td class="row-num"></td>
+      <td>id</td>
+      <td>желательно</td>
+      <td>Дедупликация (чтобы не было дублей)</td>
+      <td>49123871</td>
+    </tr>
+  </table>
+</div>
+
+</body>
+</html>

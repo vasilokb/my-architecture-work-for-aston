@@ -1,0 +1,95 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+
+title АБС-платформа — верхнеуровневая архитектура: синхронный и асинхронный каналы (C4 Container)
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 90
+skinparam ranksep 45
+skinparam backgroundColor transparent
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(bank, "Банк-клиент (пилот — Эвергрин)", "Продуктовый слой банка.\nПервый из банков; платформа рассчитана\nна подключение новых")
+
+System_Boundary(abs, "АБС-платформа (мультитенантная)") {
+
+    Container(gw, "API Gateway", "Kong + OPA", "Проверка подлинности банка,\nограничение нагрузки (3–5 запросов/сек на банк),\nопределение банка-отправителя")
+    Container(kc, "Keycloak", "", "Выдача токенов доступа")
+    Boundary(sync, "Синхронные сервисы (REST)") {
+        Container(app, "credit-decision (сервис заявок)", "Java 21 — модульный монолит", "Обработка заявки, решение,\nкредитное предложение\nPOST /api/v1/applications")
+        Container(acc, "Сервис счетов", "Java 21", "Открытие счетов, операции\nPOST /api/v1/accounting/transactions")
+        Container(doc, "Сервис документов", "Java 21", "Черновик договора")
+        Container(prod, "Product Catalog\n(Сервис кредитных продуктов)", "Java 21", "Создание\выдача\изменение кредитного продукта\n")
+        Container(cli, "Client Service\n(Сервис клиентов)", "Java 21", "Создание, просмотр информации, редактирование данных банка\nи клиентов банка")
+        Container(adm, "Admin Service\n(Сервис администрирования)", "Java 21", "Идентификация сотрудников, реализация ролевой системы")
+    }
+    
+
+
+    Boundary(facade, "Асинхронный фасад") {
+        Container(ops, "Operations API", "Java 21", "Приём асинхронной операции —\nответ «принято» сразу;\nзапрос статуса и результата")
+        ContainerDb(tbl, "Таблица операций", "PostgreSQL", "Все асинхронные операции и их статусы;\nповторный запрос от банка\nне создаёт вторую операцию")
+        Container(relay, "Task Relay", "Java 21", "Фоновая отправка принятых\nопераций в очередь задач")
+        Container(consumer, "Consumer задач", "Java 21", "Читает задачи из очереди\nи вызывает REST сервисов —\nв темпе, который выдерживают сервисы")
+        Container(rcon, "Result Consumer", "Java 21", "Фиксирует результат обработки\nв статусе операции")
+        Container(whs, "Webhook Sender", "Java 21", "Сообщает банку о завершении:\nподписанный HTTPS-запрос,\nповторы при сбоях доставки")
+        ContainerDb(dlqw, "webhook_dead_letters", "PostgreSQL", "Недоставленные уведомления\n(разбор вручную, повторная отправка)")
+        ContainerQueue(mq, "Kafka", "Apache Kafka", "Очередь задач и очередь результатов;\nдубликаты возможны — от них защищены сервисы")
+        Container(notif, "Notification Service", "Java 21", "Отправка уведомления о регистрации")
+    }
+
+    Container(egw, "Egress Gateway (этап 2)", "Kong / Envoy", "Единая точка исходящих вызовов в банки:\nTLS/mTLS-сертификаты и ключи подписи в одном месте,\nаудит и лимиты исходящего трафика,\nскрытие внутренней топологии платформы.\nНа MVP вебхук уходит напрямую, минуя шлюз")
+}
+
+' === СИНХРОННЫЙ КАНАЛ ===
+Rel(bank, gw, "1a. Синхронный запрос — решение в ответе (≤300 мс)", "HTTPS / JSON")
+Rel(gw, sync, "Маршрут по endpoint", "HTTP")
+
+
+Rel(app, prod, "Получение списка кредитных продуктов для составления кредитного предложения", "HTTP / JSON")
+
+Rel(gw,kc, "Получение токенов доступа в систему", "HTTP")
+
+Rel(gw, adm, "Получение списка разрешений для пользователя\nДанные кэшируются в Redis и инвалидируются при изменении", "HTTP")
+
+Rel(adm,kc, "Регистрация сотрудников, назначение ролей", "HTTP")
+
+Rel(cli, kc, "Регистрация банка", "HTTP")
+
+' === АСИНХРОННЫЙ КАНАЛ ===
+Rel(bank, gw, "1b. Асинхронный запрос — «принято» сразу;\nопрос статуса при необходимости", "HTTPS / JSON")
+Rel(gw, ops, "Async-канал", "HTTP")
+
+
+Rel(ops, tbl, "2. Запись «принята» — только после\nсохранения отвечаем банку", "JDBC")
+
+Rel(relay, tbl, "Чтение новых операций", "JDBC")
+Rel(relay, mq, "3. Публикация задачи", "Kafka")
+
+Rel(mq, consumer, "Чтение задач", "Kafka")
+Rel_Up(consumer, sync, "4. Вызов REST сервисов\n(повтор при сбое безопасен)", "HTTP")
+Rel_Back(consumer, mq, "5. Публикация результата", "Kafka")
+
+Rel(mq, rcon, "Чтение результатов", "Kafka")
+Rel(rcon, tbl, "6. Запись статуса и результата", "JDBC")
+
+Rel(whs, tbl, "7. Выборка завершённых операций", "JDBC")
+Rel(whs, egw, "8. Уведомление о завершении", "HTTPS")
+Rel_Back(egw, bank, "Подписанный HTTPS-запрос (вебхук)", "HTTPS")
+Rel(whs, dlqw, "Недоставлено после всех повторов", "JDBC")
+
+Rel(mq,notif, "Чтение событий о регистрации банка","Kafka")
+
+' === РАСКЛАДКА ===
+Lay_D(bank, gw)
+Lay_D(gw, sync)
+Lay_D(gw, facade)
+
+Lay_D(rcon, notif)
+
+
+ops -[hidden]-> relay
+
+SHOW_LEGEND()
+@enduml

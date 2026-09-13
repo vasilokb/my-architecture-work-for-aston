@@ -1,0 +1,101 @@
+@startuml SQLTrainer_Deployment
+skinparam monochrome true
+skinparam linetype ortho
+
+title Deployment View – SQL Trainer (Prod учебный стенд)
+
+' === Пользователь и доступ в сеть ===
+[Браузер сотрудника\n(обучающийся / методист / администратор)] as BROWSER
+
+node "VPN / Корпоративный доступ" as VPN
+BROWSER #..# VPN : HTTPS\nTLS
+
+' === Внутренняя сеть компании ===
+node "Внутренняя сеть компании" as CORP {
+
+  ' --- Периметр приложения ---
+  node "Периметр приложения" as PERIMETER {
+    [Nginx\nReverse Proxy + статика UI\nHTTPS 443] as NGINX
+  }
+
+  ' --- Кластер приложений (Kubernetes) ---
+  node "App Tier\nKubernetes Cluster" as K8S {
+
+    node "Backend Pods\n(Java + Spring Boot)" as BACKEND {
+      [Users/Auth Service] as USERS_SVC
+      [Courses/Tasks Service] as COURSES_SVC
+      [Execution Service] as EXEC_SVC
+      [Progress/Reporting Service] as PROGRESS_SVC
+    }
+  }
+
+  ' --- Слой данных ---
+  rectangle "Data Tier" as DATA_TIER {
+    node "App DB Server\nPostgreSQL 5432" as APP_DB
+    node "Training DB Server\nPostgreSQL 5432" as TRAINING_DB
+  }
+
+  ' --- Зона идентификации ---
+  rectangle "Identity Zone" as ID_ZONE {
+    node "SSO / Keycloak\nHTTPS (OIDC/OAuth2)" as KEYCLOAK
+    node "Active Directory\nLDAP/LDAPS" as AD
+  }
+
+  ' --- Зона управления и наблюдаемости (опционально) ---
+  rectangle "Management Subnet" as MGMT {
+    node "Monitoring\n(Prometheus / Grafana)" as MON
+    node "CI/CD Pipeline\n(Build & Deploy)" as CICD
+  }
+}
+
+' === Трафик пользователя ===
+VPN #--# NGINX : HTTPS 443\nдоступ к SQL Trainer
+
+' Nginx обслуживает UI и проксирует API
+NGINX #--# BACKEND : HTTP(S)\nREST API к backend-сервисам
+
+' Backend -> базы данных
+USERS_SVC   #--# APP_DB     : JDBC\nPostgreSQL 5432
+COURSES_SVC #--# APP_DB     : JDBC\nPostgreSQL 5432
+PROGRESS_SVC#--# APP_DB     : JDBC\nPostgreSQL 5432
+
+EXEC_SVC    #--# TRAINING_DB: JDBC\nPostgreSQL 5432
+
+' Интеграция с SSO/AD
+BROWSER  #--# KEYCLOAK : HTTPS\nOIDC редиректы
+NGINX    #--# KEYCLOAK : HTTPS\nJWKS / проверка токена
+KEYCLOAK #--# AD       : LDAP/LDAPS\nпроверка учётных данных
+
+' Мониторинг и CI/CD (без лишних стрелок)
+MON  #--# BACKEND  : Metrics scrape\n/metrics
+MON  #--# APP_DB   : DB metrics\nэкспортёр
+MON  #--# TRAINING_DB : DB metrics\nэкспортёр
+
+CICD #--# K8S      : Deploy\nобновление подов и конфигураций
+CICD #--# APP_DB   : Миграции схемы\nчерез службы деплоя
+
+' === Пояснения ===
+note right of TRAINING_DB
+  Training DB:
+  • учебные схемы и данные;
+  • только Execution Service имеет доступ;
+  • нет боевых клиентских данных.
+end note
+
+note right of APP_DB
+  App DB:
+  • курсы, задачи, пользователи;
+  • история попыток и прогресс;
+  • базовая отчётность.
+end note
+
+note bottom of K8S
+  Kubernetes Cluster:
+  • отдельный namespace под SQL Trainer;
+  • backend-сервисы:
+    Users/Auth, Courses/Tasks,
+    Execution, Progress/Reporting;
+  • вход в кластер только через Nginx.
+end note
+
+@enduml

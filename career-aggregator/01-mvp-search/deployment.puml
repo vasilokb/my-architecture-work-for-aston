@@ -1,0 +1,224 @@
+@startuml
+skinparam backgroundColor #F5F5F5
+skinparam node {
+  BackgroundColor #E3F2FD
+  BorderColor #1976D2
+  FontColor #0D47A1
+}
+skinparam database {
+  BackgroundColor #E8F5E8
+  BorderColor #4CAF50
+  FontColor #2E7D32
+}
+skinparam queue {
+  BackgroundColor #FFF3E0
+  BorderColor #FF9800
+  FontColor #E65100
+}
+skinparam cloud {
+  BackgroundColor #F3E5F5
+  BorderColor #9C27B0
+  FontColor #7B1FA2
+}
+
+title Архитектура развертывания Career Aggregator 2
+
+cloud "Интернет" as internet {
+  node "Пользователи" as users
+}
+
+cloud "Публичное облако\n(или локальный сервер)" as cloud {
+  
+  rectangle "Докер контейнеры" as docker {
+    node "Streamlit UI\n(порт 8501)" as streamlit {
+      database "Статические файлы" as static
+    }
+    
+    node "FastAPI Backend\n(порт 8000)" as fastapi {
+      component "Uvicorn\nASGI сервер" as uvicorn
+      component "Рабочие процессы" as workers
+    }
+    
+    node "Embedding Service\n(порт 8080)" as embedding {
+      component "Sentence-Transformers" as st
+      database "Модели\n(all-MiniLM-L6-v2)" as models
+    }
+    
+    node "Redis Cache\n(порт 6379)" as redis {
+      database "In-memory хранилище" as redis_db
+    }
+  }
+  
+  rectangle "Внешние зависимости" as external {
+    cloud "DeepSeek API" as deepseek
+    cloud "HH.ru API" as hhru
+  }
+}
+
+' Сетевые связи
+users --> streamlit : HTTP/HTTPS\nПорт 8501
+streamlit --> fastapi : REST API\nПорт 8000
+fastapi --> embedding : gRPC/HTTP\nПорт 8080
+fastapi --> redis : Redis protocol\nПорт 6379
+fastapi --> hhru : HTTPS API\nПорт 443
+fastapi --> deepseek : HTTPS API\nПорт 443
+
+' Внутренние связи
+streamlit --> static : Чтение ресурсов
+fastapi --> uvicorn : Запросы
+uvicorn --> workers : Распределение
+embedding --> st : Вызов модели
+st --> models : Загрузка весов
+redis --> redis_db : Данные в памяти
+
+' Группировка для Docker Compose
+package "Docker Compose Services" {
+  streamlit -[hidden]> fastapi
+  fastapi -[hidden]> embedding
+  embedding -[hidden]> redis
+}
+
+note top of docker
+  Все сервисы запускаются через
+  docker-compose up
+  Конфигурация в docker-compose.yml
+end note
+
+== Конфигурация портов ==
+
+rectangle "Порты и протоколы" as ports {
+  node "Порт 8501" as p8501 {
+    Протокол: HTTP
+    Сервис: Streamlit UI
+    Назначение: Веб-интерфейс
+  }
+  
+  node "Порт 8000" as p8000 {
+    Протокол: HTTP
+    Сервис: FastAPI Backend
+    Назначение: REST API
+  }
+  
+  node "Порт 8080" as p8080 {
+    Протокол: HTTP/gRPC
+    Сервис: Embedding Service
+    Назначение: Векторизация
+  }
+  
+  node "Порт 6379" as p6379 {
+    Протокол: Redis
+    Сервис: Redis Cache
+    Назначение: Кэширование
+  }
+}
+
+== Ресурсы и масштабирование ==
+
+rectangle "Ресурсы контейнеров" as resources {
+  node "Streamlit UI" as r1 {
+    CPU: 0.5 ядра
+    RAM: 512 MB
+    Диск: 100 MB
+  }
+  
+  node "FastAPI Backend" as r2 {
+    CPU: 1 ядро
+    RAM: 1 GB
+    Диск: 200 MB
+  }
+  
+  node "Embedding Service" as r3 {
+    CPU: 2 ядра
+    RAM: 2 GB
+    Диск: 500 MB (модели)
+  }
+  
+  node "Redis Cache" as r4 {
+    CPU: 0.5 ядра
+    RAM: 1 GB
+    Диск: in-memory
+  }
+}
+
+== Сценарии развертывания ==
+
+rectangle "Локальная разработка" as local {
+  node "Разработчик\nлокально" as dev
+  database "Docker Desktop" as docker_desktop
+  
+  dev --> docker_desktop : docker-compose up
+  docker_desktop --> docker : Запуск контейнеров
+}
+
+rectangle "Продакшен (облако)" as production {
+  cloud "AWS/GCP/Azure" as aws
+  node "Load Balancer" as lb
+  node "Auto Scaling Group" as asg
+  
+  internet --> lb : Трафик
+  lb --> asg : Распределение
+  asg --> docker : Контейнеры
+}
+
+== Резервное копирование и мониторинг ==
+
+rectangle "Инфраструктурные сервисы" as infra {
+  database "Логи\n(ELK Stack)" as logs {
+    [Elasticsearch]
+    [Logstash]
+    [Kibana]
+  }
+  
+  database "Мониторинг\n(Prometheus+Grafana)" as monitoring {
+    [Prometheus]
+    [Grafana]
+    [Alertmanager]
+  }
+  
+  database "Резервные копии" as backup {
+    [Ежедневный бэкап]
+    [Конфигурации]
+    [Модели]
+  }
+}
+
+docker --> logs : Отправка логов
+docker --> monitoring : Метрики
+docker --> backup : Бэкап данных
+
+note right of backup
+  Критические данные для бэкапа:
+  1. Конфигурации Docker
+  2. Модели эмбеддингов
+  3. Redis дамп (опционально)
+  4. Логи приложений
+end note
+
+== Безопасность ==
+
+rectangle "Меры безопасности" as security {
+  node "HTTPS/TLS" as s1 {
+    Сертификаты Let's Encrypt
+    Автоматическое обновление
+  }
+  
+  node "Firewall Rules" as s2 {
+    Только необходимые порты
+    Блокировка внешнего доступа к Redis
+  }
+  
+  node "Rate Limiting" as s3 {
+    Ограничение запросов на API
+    Защита от DDoS
+  }
+  
+  node "Secrets Management" as s4 {
+    API ключи в переменных окружения
+    Без хранения в репозитории
+  }
+}
+
+internet -[hidden]-> security
+security -[hidden]-> docker
+
+@enduml

@@ -1,0 +1,75 @@
+@startuml
+title Поток аутентификации и использование AuthFacade
+
+actor User as u
+
+participant "Browser\n(браузер)" as br
+participant "SQL Trainer UI\n(SPA)" as ui
+participant "Nginx\n/API Gateway" as ngx
+participant "Users/Auth Service\n(Spring Boot)" as auth_svc
+participant "Spring Security\nFilter Chain" as sec
+participant "AuthController\n(REST)" as auth_ctrl
+participant "AuthFacade\n(интерфейс)" as auth_iface
+participant "KeycloakAuthFacade\n(реализация фасада)" as auth_impl
+
+participant "Keycloak\n(IdP)" as kc
+participant "Active Directory\n(AD)" as ad
+
+' === Этап 1. Пользователь логинится через Keycloak ===
+
+u -> br : открывает https://sql-trainer.company/app
+br -> ngx : GET /app
+ngx -> ui : отдаёт SPA (HTML, JS, CSS)
+
+' SPA загружается, понимает, что нет токена
+ui -> br : выполняет redirect\nна страницу логина Keycloak
+br -> kc : GET /auth/realms/.../protocol/openid-connect/auth\n(запрос аутентификации)
+
+' Keycloak показывает форму логина
+kc -> u : форма логина
+u -> kc : логин/пароль
+kc -> ad : проверка учётных данных
+ad --> kc : OK/FAIL
+kc --> br : redirect обратно в SPA\n+ код/токен (OIDC)
+
+' SPA получает токен и хранит его
+br -> ui : токен (id_token/access_token)
+note right of ui
+  SPA сохраняет токен
+  (например, в памяти/secure storage)
+  и будет отправлять его
+  в Authorization: Bearer ...
+end note
+
+' === Этап 2. Запрос к защищённому API с токеном ===
+
+u -> ui : нажимает "Показать мои курсы"
+ui -> ngx : GET /api/courses\nAuthorization: Bearer <access_token>
+
+ngx -> auth_svc : прокидывает запрос\nс заголовком Authorization
+
+' На входе в сервис срабатывает Spring Security
+auth_svc -> sec : фильтрация и проверка токена
+sec -> kc : запрос на проверку/загрузку JWK\n(при необходимости)
+kc --> sec : ключи / информация о токене
+sec --> auth_svc : SecurityContext\n(пользователь аутентифицирован)
+
+' Контроллер попадает в код
+auth_svc -> auth_ctrl : вызов обработчика\nнапример, GET /api/me
+
+' Контроллер/сервис вызывают фасад аутентификации
+auth_ctrl -> auth_iface : getCurrentUser()
+
+' В рантайме под интерфейсом AuthFacade\nподнимается реализация KeycloakAuthFacade
+auth_iface -> auth_impl : delegирование вызова
+
+' Реализация фасада читает SecurityContext и мапит в доменную модель
+auth_impl -> sec : SecurityContextHolder.getContext()
+auth_impl --> auth_ctrl : AuthUser(id, username, email, roles)
+
+auth_ctrl --> auth_svc : возвращает DTO с пользователем
+auth_svc --> ngx : HTTP 200 + JSON (пользователь)
+ngx --> ui : HTTP 200 + JSON
+ui --> u : показывает имя, роли и т.п.
+
+@enduml

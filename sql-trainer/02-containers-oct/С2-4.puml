@@ -1,0 +1,114 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+skinparam backgroundColor transparent
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+title SQL Trainer — MVP 1.0 (один API Gateway + Execution с bulkhead/очередью/polling)
+
+Person(trainee, "Trainee", "Пользуется тренажёром")
+
+System_Boundary(front, "Front [Software System]") {
+  Container(web, "WEB", "JavaScript, React", "UI для trainee")
+}
+
+' ===== Единственный шлюз =====
+Container(gw, "API Gateway", "Spring Cloud Gateway", "Единая точка входа.\nJWT проверка, rate-limit.\nResilience: timeout, retry (safe), circuit breaker для внутренних REST-вызовов\n[MVP 1.0]")
+
+System_Ext(crm, "CRM Trainee", "Software System", "Передача и приём данных")
+System_Ext(kc, "Keycloak", "Software System", "Аутентификация и авторизация (OIDC)")
+System_Ext(ad, "Active Directory", "Software System", "LDAP/LDAPS")
+
+' ===== Users =====
+System_Boundary(usersb, "Сервис Пользователи [MVP]") {
+  Container(users, "Users", "Java", "Профили (без ролей/паролей)")
+  ContainerDb(usersdb, "Users DB", "PostgreSQL", "Профили пользователей")
+}
+
+' ===== Tasks =====
+System_Boundary(tasksb, "Сервис Задачи [MVP]") {
+  Container(tasks_stmt, "Tasks — Формулировки", "Java", "Условия")
+  Container(tasks_ans,  "Tasks — Ответы", "Java", "Эталонные ответы")
+  Container(tasks_erd,  "Tasks — ERD", "Java", "Описание учебных схем")
+  ContainerDb(tasksdb,  "Tasks DB", "PostgreSQL", "Данные по задачам")
+}
+
+' ===== Progress =====
+System_Boundary(progb, "Сервис Прогресс [MVP]") {
+  Container(progress, "Progress", "Java", "Учёт прогресса")
+  ContainerDb(progressdb, "Progress DB", "PostgreSQL", "Прогресс пользователей")
+}
+
+' ===== Execution (bulkhead + очередь + polling) =====
+System_Boundary(execb, "Сервис Выполнения [MVP]") {
+  Container(exec_api, "Execution API", "Java",    "Приём submit.\nИдемпотентность (Idempotency-Key).\nСтатусы и polling API")
+  Container(exec_worker, "Execution Worker", "Java",    "Фоновое выполнение SQL.\nBulkhead: ограниченный пул воркеров.\nТаймауты/лимиты/отмена.\nLease/Heartbeat.\nPriority/Fair-queue")
+  ContainerDb(execdb, "Exec DB", "PostgreSQL",    "SUBMISSION(id, user_id, task_id, sql, status, priority, attempts,\n lease_owner, lease_until, created_at, started_at, finished_at,\n metrics, error, idempotency_key)\nSUBMISSION_RESULT(submission_id, rows, truncated)\nSUBMISSION_DLQ(...)")
+}
+
+System_Ext(trainingpg, "Training PostgreSQL", "Database", "Учебные схемы; роль read-only")
+
+' ===== Relations =====
+Rel(trainee, web, "Пользуется")
+Rel(web, gw, "HTTP (REST)")
+
+Rel(gw, crm, "REST")
+
+Rel_R(web, kc, "OIDC логин/SSO", "HTTPS")
+Rel_R(gw, kc, "JWKS проверка JWT", "HTTPS")
+Rel_R(kc, ad, "Федерация пользователей", "LDAPS")
+
+Rel(gw, users, "REST")
+Rel(gw, tasks_stmt, "REST")
+Rel(gw, tasks_ans,  "REST")
+Rel(gw, tasks_erd,  "REST")
+Rel(gw, progress,   "REST")
+
+' Execution маршруты через единый Gateway
+Rel(gw, exec_api, "POST /exec/submit → 202 + id\nGET /exec/{id}/status\nGET /exec/{id}/result\nPOST /exec/{id}/cancel", "REST/JSON")
+
+' Сервисы к БД
+Rel(users, usersdb, "READ/WRITE", "JDBC")
+Rel(tasks_stmt, tasksdb, "READ/WRITE", "JDBC")
+Rel(tasks_ans,  tasksdb, "READ/WRITE", "JDBC")
+Rel(tasks_erd,  tasksdb, "READ/WRITE", "JDBC")
+Rel(progress, progressdb, "READ/WRITE", "JDBC")
+
+' Execution internal
+Rel(exec_api, execdb, "WRITE SUBMISSION / READ status/result", "JDBC")
+Rel(exec_worker, execdb, "Poll next (FOR UPDATE SKIP LOCKED),\nupdate status/result, heartbeat, DLQ", "JDBC")
+Rel(exec_worker, trainingpg, "Выполнение SQL (read-only)\nSET LOCAL statement_timeout, row_limit", "JDBC (ro)")
+
+' ===== Notes =====
+note right of gw
+"Resilience в Gateway:
+• Timeout для backend-вызовов
+• Retry (только safe: GET) при временных сбоях
+• Circuit Breaker для деградирующих сервисов
+"
+end note
+
+note bottom of exec_worker
+"Execution защита:
+• Bulkhead: N воркеров/инстанс, fair-queue, per-user cap
+• Circuit Breaker к Training PG (closed/open/half-open), fail-fast
+• Таймауты, max_rows, огранич. памяти драйвера
+• Только SELECT; роль read-only; фиксированный search_path
+• Lease/Heartbeat, повтор с backoff, DLQ
+"
+end note
+
+note right of gw
+"Graceful Shutdown (Gateway):
+• SIGTERM → drain: не принимаем POST /exec/submit (503 + Retry-After)
+• Продолжаем GET /status и /result
+• readinessProbe = FAIL, ждём N секунд, закрываем соединения"
+end note
+
+note bottom of exec_worker
+"Graceful Shutdown (Worker):
+• is_draining=true → перестаём poll-ить новые job’ы
+• Текущие job’ы: попытка завершить до grace_timeout
+• Если не успели — requeue: статус queued, сброс lease, backoff
+• Финальный heartbeat, pg_cancel_backend, закрытие пулов"
+end note
+@enduml

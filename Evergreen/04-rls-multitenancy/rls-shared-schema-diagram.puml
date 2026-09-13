@@ -1,0 +1,223 @@
+@startuml
+!define RECTANGLE class
+skinparam backgroundColor transparent
+skinparam linetype ortho
+skinparam nodesep 50
+skinparam ranksep 40
+
+title Реализация Row-Level Security (RLS) в Shared Schema - Облачная АБС
+
+' === ЦВЕТА ===
+!define COLOR_TENANT #FFE5CC
+!define COLOR_APP #CCE5FF
+!define COLOR_DB #CCFFCC
+!define COLOR_SECURITY #FFCCCC
+!define COLOR_DATA #E6CCFF
+
+' === КОМПОНЕНТЫ СИСТЕМЫ ===
+
+rectangle "Клиент Банка А" as client_alfa #COLOR_TENANT
+rectangle "Клиент Банка Б" as client_beta #COLOR_TENANT
+
+rectangle "API Gateway" as api_gateway #COLOR_APP {
+  rectangle "JWT Parser" as jwt_parser
+  rectangle "Tenant Extractor" as tenant_extractor
+}
+
+rectangle "Бизнес-сервис\n(Модуль клиентов)" as business_service #COLOR_APP {
+  rectangle "TenantInterceptor" as interceptor
+  rectangle "TenantContext\n(ThreadLocal)" as tenant_context
+  rectangle "Service Layer" as service_layer
+  rectangle "Repository" as repository
+}
+
+rectangle "Connection Pool" as connection_pool #COLOR_APP {
+  rectangle "SafeTenantAwareDataSource" as data_source
+  rectangle "Connection Proxy\n(implements Wrapper)" as connection_proxy
+}
+
+database "PostgreSQL Cluster\nShared Schema" as postgresql #COLOR_DB {
+  rectangle "Таблица: clients" as table_clients #COLOR_DATA {
+    rectangle "RLS Policy\nWITH FORCE" as rls_policy
+    rectangle "Данные всех тенантов" as shared_data {
+      card "id: 1\ntenant_id: alfa\nname: Иван\nБанк А" as row_alfa_1
+      card "id: 2\ntenant_id: alfa\nname: Мария\nБанк А" as row_alfa_2
+      card "id: 3\ntenant_id: beta\nname: Петр\nБанк Б" as row_beta_1
+      card "id: 4\ntenant_id: beta\nname: Анна\nБанк Б" as row_beta_2
+    }
+    rectangle "Индексы" as indexes {
+      card "idx_clients_tenant_id\n(tenant_id, id)" as index_tenant
+      card "idx_clients_active\nWHERE status='ACTIVE'" as index_active
+    }
+  }
+  
+  rectangle "Таблица: accounts" as table_accounts #COLOR_DATA {
+    rectangle "Составной Foreign Key" as composite_fk {
+      card "FOREIGN KEY\n(tenant_id, client_id)\nREFERENCES clients\n(tenant_id, id)" as fk_details
+    }
+    rectangle "Индексы" as accounts_indexes {
+      card "idx_accounts_tenant_client\n(tenant_id, client_id)" as index_accounts
+    }
+  }
+}
+
+rectangle "Безопасность" as security #COLOR_SECURITY {
+  rectangle "Keycloak" as keycloak
+  rectangle "JWT Token" as jwt_token
+}
+
+rectangle "Аналитическое хранилище" as analytics #COLOR_DB {
+  database "ClickHouse" as clickhouse
+  rectangle "CDC Pipeline" as cdc
+}
+
+' === ПОТОК ДАННЫХ ===
+
+' 1. Аутентификация Банка А
+client_alfa -> api_gateway : "1. HTTPS запрос\n(JWT: tenant_id=alfa)"
+api_gateway -> keycloak : "2. Валидация токена"
+keycloak --> api_gateway : "3. Valid JWT"
+jwt_parser -> tenant_extractor : "4. Извлечение tenant_id=alfa"
+tenant_extractor -> api_gateway : "5. Добавление X-Tenant-ID: alfa"
+
+' 2. Обработка в бизнес-сервисе
+api_gateway -> business_service : "6. REST API запрос\n(X-Tenant-ID: alfa)"
+interceptor -> tenant_context : "7. Установка tenant_id=alfa в ThreadLocal"
+tenant_context -> service_layer : "8. Бизнес-логика"
+service_layer -> repository : "9. Вызов репозитория"
+
+' 3. Работа с базой данных
+repository -> connection_pool : "10. Запрос соединения"
+data_source -> connection_proxy : "11. Получение connection"
+connection_proxy -> postgresql : "12. Установка сессионной переменной\nSET app.current_tenant = 'alfa'"
+
+' 4. Применение RLS в Shared Schema
+postgresql -> table_clients : "13. Запрос к таблице clients\n(SELECT * FROM clients)"
+rls_policy -> shared_data : "14. Применение политики RLS:\ntenant_id = current_setting('app.current_tenant')"
+shared_data --> rls_policy : "15. Фильтрация: возврат только строк\nс tenant_id = 'alfa' (id: 1, 2)"
+rls_policy --> table_clients : "16. Отфильтрованные данные\n(2 записи Банка А)"
+table_clients --> postgresql : "17. Результат запроса"
+
+' 5. Возврат данных
+postgresql --> connection_proxy : "18. Результат SQL запроса"
+connection_proxy --> data_source : "19. Connection с результатами"
+data_source --> connection_pool : "20. Возврат соединения\n+ RESET app.current_tenant"
+connection_pool --> repository : "21. Результат запроса"
+repository --> service_layer : "22. Объекты домена"
+service_layer --> tenant_context : "23. Очистка ThreadLocal"
+tenant_context --> interceptor : "24. Завершение обработки"
+interceptor --> business_service : "25. Формирование ответа"
+business_service --> api_gateway : "26. REST API ответ"
+api_gateway --> client_alfa : "27. HTTP ответ\n(только данные Банка А)"
+
+' 6. Параллельный запрос Банка Б
+client_beta -> api_gateway : "A. HTTPS запрос\n(JWT: tenant_id=beta)"
+api_gateway -> business_service : "B. REST API запрос\n(X-Tenant-ID: beta)"
+business_service -> postgresql : "C. SET app.current_tenant = 'beta'"
+postgresql -> table_clients : "D. Тот же запрос к clients"
+rls_policy -> shared_data : "E. Фильтрация: tenant_id = 'beta'\n(id: 3, 4)"
+shared_data --> client_beta : "F. Ответ: только данные Банка Б"
+
+' 7. CDC пайплайн для аналитики
+table_clients -> cdc : "28. Change Data Capture\n(Debezium/Kafka)"
+cdc -> clickhouse : "29. Репликация в ClickHouse\nдля отчетности"
+
+' === КРИТИЧЕСКИЕ КОМПОНЕНТЫ ===
+
+rectangle "Критические компоненты" as critical_components {
+  rectangle "FORCE ROW LEVEL SECURITY" as force_rls
+  rectangle "Составные Foreign Keys" as composite_keys
+  rectangle "Connection Proxy\nс Wrapper" as wrapper_proxy
+  rectangle "Индексы с tenant_id первым" as tenant_first_indexes
+}
+
+force_rls -[hidden]-> rls_policy
+composite_keys -[hidden]-> composite_fk
+wrapper_proxy -[hidden]-> connection_proxy
+tenant_first_indexes -[hidden]-> indexes
+
+' === ЛЕГЕНДА ===
+
+legend right
+  <b>Архитектура Shared Schema:</b>
+  • Все тенанты в одной схеме PostgreSQL
+  • Изоляция через RLS политики
+  • Составные индексы с tenant_id первым
+  • Составные foreign keys для целостности
+  |
+  <b>Критические улучшения:</b>
+  1. <b>FORCE ROW LEVEL SECURITY</b> - политики работают даже для владельца
+  2. <b>Connection Proxy с Wrapper</b> - совместимость с Hibernate
+  3. <b>Гарантированная очистка</b> - RESET в finally блоке
+  4. <b>CDC + ClickHouse</b> - аналитика без RLS overhead
+  |
+  <b>Преимущества перед Schema Isolation:</b>
+  • Нет раздувания системного каталога
+  • Эффективное использование shared buffers
+  • Упрощенные миграции (один скрипт)
+  • Лучшая статистика планировщика
+end legend
+
+' === ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ===
+
+note top of postgresql
+  <b>PostgreSQL RLS Configuration (Shared Schema):</b>
+  
+  -- Включение RLS с FORCE (КРИТИЧНО)
+  ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE clients FORCE ROW LEVEL SECURITY;
+  
+  -- Простая политика без подзапросов
+  CREATE POLICY tenant_isolation_policy
+  ON clients USING (
+    tenant_id = current_setting('app.current_tenant', true)
+  );
+  
+  -- Составной foreign key
+  ALTER TABLE accounts ADD CONSTRAINT fk_accounts_clients
+  FOREIGN KEY (tenant_id, client_id)
+  REFERENCES clients(tenant_id, id);
+  
+  -- Индекс с tenant_id первым
+  CREATE INDEX idx_clients_tenant_id 
+  ON clients(tenant_id, id);
+end note
+
+note bottom of connection_proxy
+  <b>Connection Proxy с Wrapper:</b>
+  
+  public class TenantAwareConnectionProxy 
+    implements Connection, Wrapper {
+    
+    @Override
+    public <T> T unwrap(Class<T> iface) {
+      return iface.isInstance(this) 
+        ? iface.cast(this)
+        : delegate.unwrap(iface);
+    }
+    
+    @Override
+    public void close() {
+      try {
+        // ГАРАНТИРОВАННАЯ очистка
+        if (tenantSet) {
+          stmt.execute("RESET app.current_tenant");
+        }
+      } finally {
+        delegate.close();
+      }
+    }
+  }
+end note
+
+note right of analytics
+  <b>Аналитическое хранилище:</b>
+  
+  • Транзакционная БД: PostgreSQL с RLS
+  • CDC: Debezium → Kafka
+  • Аналитическая БД: ClickHouse
+  • Отчеты: без RLS overhead
+  • Partitioning по tenant_id
+end note
+
+@enduml

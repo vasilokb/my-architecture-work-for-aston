@@ -1,0 +1,163 @@
+@startuml
+title Аутентификация и авторизация в SAAS ABS — итоговая диаграмма контейнеров
+
+skinparam backgroundColor #FAFAFA
+skinparam shadowing false
+skinparam participant {
+    BackgroundColor<<ui>>      #FFE5CC
+    BackgroundColor<<gateway>> #CCE5FF
+    BackgroundColor<<iam>>     #FFCCCC
+    BackgroundColor<<pdp>>     #D5E8D4
+    BackgroundColor<<svc>>     #DAE8FC
+    BackgroundColor<<data>>    #F2F2F2
+    BorderColor #333333
+}
+
+actor   "Сотрудник банка\n(UI банка)"      as UI        <<ui>>
+actor   "Владелец банка\n(UI админки)"      as UI_ADMIN  <<ui>>
+participant "Kong\nAPI Gateway"            as KONG      <<gateway>>
+participant "Keycloak\n(IdP)"              as KC        <<iam>>
+participant "Redis\n(blacklist + JWKS)"    as REDIS     <<data>>
+participant "OPA\n(PDP)"                   as OPA       <<pdp>>
+participant "Backend\n(Account/Client/...)" as BACKEND  <<svc>>
+participant "Admin Service"                as ADMIN     <<svc>>
+participant "OPA Bundle Server"            as BUNDLE    <<svc>>
+database    "admin_db\n(role_permissions)" as ADMIN_DB  <<data>>
+database    "PostgreSQL\nбизнес-данные + RLS" as PG      <<data>>
+participant "Kafka\n(топик auth-audit)"    as KAFKA    <<data>>
+
+== Сценарий 1. Логин сотрудника (Auth Code + PKCE) ==
+note over UI, KC
+  Kong тут НЕ участвует.\nUI банка использует OAuth 2.0 Authorization Code + PKCE.\nПароль вводится В Keycloak, не в UI-клиент.
+end note
+UI -> KC: GET /realms/abs/protocol/openid-connect/auth\n  ?client_id=bank-007\n  &response_type=code\n  &redirect_uri=https://bank-007.ru/callback\n  &code_challenge=<PKCE_challenge>\n  &code_challenge_method=S256\n  &scope=openid
+KC --> UI: 302 Redirect\n  Location: https://bank-007.ru/callback?code=XYZ&state=...
+note over UI
+  Сотрудник вводит логин/пароль В Keycloak (login page)
+end note
+UI -> KC: POST /realms/abs/protocol/openid-connect/token\n  grant_type=authorization_code\n  code=XYZ\n  client_id=bank-007\n  code_verifier=<PKCE_verifier>
+KC --> UI: JWT (TTL 1 час) + refresh_token:\n  • sub = user_id\n  • tenant_id = bank-007\n  • realm_access.roles (5 базовых)\n  • resource_access.bank-007.roles (client-роли)
+
+== Сценарий 2. Аутентифицированный запрос к АБС ==
+note over KONG
+  Kong делает ТОЛЬКО:\n  1) routing\n  2) проверка подписи JWT\n  3) blacklist в Redis\n  4) вызов OPA\n  5) проксирование\n\n  В Keycloak НЕ ходит.
+end note
+UI -> KONG: GET /api/v1/accounts\nAuthorization: Bearer <JWT>
+KONG -> KONG: verify JWT signature
+KONG -> REDIS: GET jwks:key:{kid} (per-kid cache, TTL 5 мин)
+note over REDIS, KONG
+  Cache hit → используем кэшированный ключ.
+  Cache miss → force refresh JWKS из Keycloak,
+  кладём каждый kid в Redis с TTL 5 мин.
+  Keycloak держит Active keys timeout ≥ 10 мин\n(grace period при ротации).
+end note
+KONG -> KONG: verify signature OK
+KONG -> REDIS: EXISTS blacklist:user:{user_id}\nEXISTS blacklist:tenant:bank-007
+REDIS --> KONG: false
+KONG -> OPA: POST /v1/data/abs.rbac.authz/allow\ninput: {tenant_id, roles, method, path}
+OPA -> OPA: проверка в bundle\n(data.tenants + data.roles)
+OPA --> KONG: {"result": true}
+KONG -> BACKEND: GET /api/v1/accounts\n+X-User-Id, X-User-Roles
+BACKEND -> PG: SET LOCAL app.current_tenant = 'bank-007'\nSELECT ... FROM accounts WHERE tenant_id=...
+PG --> BACKEND: данные
+BACKEND --> KONG: 200 OK
+KONG --> UI: JSON
+KONG ->> KAFKA: auth-audit event\n(allow, async fire-and-forget)\nts, tenant_id, user_id, roles,\nmethod, path, opa_decision, latency
+note right of KAFKA #FAFAFA
+  Audit Service потребляет,\nхранит в ClickHouse.\nРегуляторное требование (152-ФЗ, ЦБ РФ).
+end note
+
+== Сценарий 3. Владелец банка создаёт роль (через Admin Service) ==
+note over UI_ADMIN, KC
+  Admin Service говорит с Keycloak напрямую.\n  Kong тут — только прокси.
+end note
+UI_ADMIN -> KONG: POST /v1/banks/bank-007/roles\nAuthorization: Bearer <JWT, role=bank_admin>
+KONG -> KONG: verify JWT
+KONG -> OPA: input: {roles=[bank_admin], method=POST, path=/v1/banks/.../roles}
+OPA --> KONG: allow
+KONG ->> KAFKA: auth-audit event\n(allow, async)
+KONG -> ADMIN: проксирование
+ADMIN -> KC: POST /admin/realms/abs/clients/{bank-uuid}/roles\n{name: "senior_operator"}
+KC --> ADMIN: 201 Created
+ADMIN -> ADMIN_DB: INSERT INTO role_permissions (role, method)
+ADMIN -> BUNDLE: POST /internal/v1/bundle/trigger
+note right of BUNDLE
+  Синхронно получил сигнал.\n  Дальше асинхронный воркер.
+end note
+BUNDLE -> ADMIN_DB: SELECT * FROM role_permissions
+BUNDLE -> BUNDLE: формирует data.json
+BUNDLE -> OPA: PUT /v1/policies/bundle
+OPA -> OPA: применяет новый bundle
+
+== Сценарий 4. Увольнение сотрудника (blacklist) ==
+UI_ADMIN -> KONG: DELETE /v1/banks/bank-007/users/{user_id}
+KONG -> ADMIN: проксирование
+ADMIN -> REDIS: SET blacklist:user:{user_id} EX 3600\n(TTL = JWT TTL, автоочистка)
+ADMIN -> KC: PUT /admin/realms/abs/users/{user_id}\n{enabled: false}\n(асинхронно, не блокирует)
+note over KONG
+  Следующий запрос уволенного сотрудника:\n  Kong → EXISTS blacklist:user:{user_id} → true → 401\n  Токен ещё валиден, но blacklist его блокирует.\n  Kong пишет auth-audit (deny, reason=blacklist_user).
+end note
+
+== Сценарий 5. OPA недоступен (fail-closed) ==
+UI -> KONG: GET /api/v1/accounts\nAuthorization: Bearer <JWT>
+KONG -> KONG: verify JWT (OK)
+KONG -> REDIS: EXISTS blacklist:* (OK, false)
+KONG -> OPA: POST /v1/data/abs.rbac.authz/allow\ninput: {tenant_id, roles, method, path}
+note over OPA, KONG #FFCCCC
+  OPA не отвечает: timeout 50 мс истёк\nили 5xx от реплики\n\n  Все реплики OPA недоступны (HA exhausted).
+end note
+KONG -> KONG: fail-closed\ndefault-deny для banking
+KONG ->> KAFKA: auth-audit event\n(deny, reason=opa_timeout, async)
+KONG --> UI: 503 Service Unavailable\nRetry-After: 5
+note over KONG, OPA
+  **Fail-closed — единственный безопасный default для banking.**
+  Альтернативы отклонены:
+  • Allow (fail-open) = дыра в безопасности
+  • Cached decision из Redis = stale allow для\n  уволенного сотрудника / изменённой роли
+\n  Защита обеспечивается HA OPA:\n  2-3 реплики за DNS / Service Mesh,\n  автоматический failover < 5 сек.\n  SLA: доступность OPA >= 99.95%.\n  При полном отказе — алерт on-call, runbook\n  на восстановление (kubectl rollout / перезапуск).
+end note
+
+== Сценарий 6. Refresh token (минуя Kong) ==
+note over UI, KC
+  Refresh идёт UI → Keycloak НАПРЯМУЮ.\n  Kong тут НЕ участвует, blacklist в Redis\n  не проверяется. Защиту держит\n  Keycloak через user.enabled.
+end note
+UI -> KC: POST /realms/abs/protocol/openid-connect/token\n  grant_type=refresh_token\n  refresh_token=<старый refresh>
+KC -> KC: проверить user.enabled
+alt user.enabled == true
+    KC --> UI: 200 OK\n  new access_token (TTL 1 час) + опц. new refresh_token
+else user.enabled == false (сотрудник уволен)
+    KC --> UI: 401 Unauthorized\n  invalid_grant: "Account disabled"
+end
+note over UI, KC
+  Сценарий увольнения:\n  1. Admin Service: SET blacklist:user:{user_id} (Redis, TTL 1ч)\n  2. Admin Service: PUT /users/{user_id} {enabled: false}\n  3. Сотрудник пытается refresh → Keycloak отклоняет.\n  Blacklist в Redis — fast-path для уже выпущенных\n  access_token, а не для refresh.
+end note
+
+== Сценарий 7. Internal service-to-service (X-User-Roles) ==
+note over KONG, BACKEND
+  Внутри mTLS-периметра Istio backend-сервисы\n  доверяют X-User-Roles (без вызова OPA).\n  Решение #9 протокола 19.06.2026.
+end note
+UI -> KONG: POST /api/v1/credits/{id}/approve\n  + Bearer JWT
+KONG -> KONG: verify JWT (OK)
+KONG -> OPA: input: {roles=[manager], method=POST, path=.../approve}
+OPA --> KONG: allow
+KONG ->> KAFKA: auth-audit (allow)
+KONG -> TXN: POST /api/v1/credits/{id}/approve\n  + X-User-Id: <sub из JWT>\n  + X-User-Roles: [manager]
+note over TXN
+  **Критичная операция (одобрение кредита).**\n  TXN НЕ доверяет слепо X-User-Roles.\n  Доп. проверка: tenant_id + role внутри сервиса.
+end note
+TXN -> TXN: проверить role содержит 'manager' (defense in depth)
+TXN -> ACCT: GET /accounts/{account_id}\n  + X-User-Id, X-User-Roles (прокидывает)
+note over ACCT
+  **Тоже критичная.** Доп. проверка:\n  X-User-Id == account.owner_id.
+end note
+ACCT -> ACCT: проверить X-User-Id == account.owner_id
+ACCT --> TXN: 200 OK (account data)
+TXN -> PG: INSERT credit_decision (RLS по tenant_id)
+PG --> TXN: OK
+TXN --> KONG: 200 OK (credit approved)
+KONG --> UI: 200 OK
+note over KONG, PG
+  **Threat model:** X-User-Roles доверяется\n  внутри mTLS-периметра Istio.\n  Компрометация пода = полная эскалация\n  привилегий в кластере (X-User-Roles вторичен).\n  Защита: mTLS + NetworkPolicy + runtime security (Falco)\n  + RLS в PostgreSQL (последний рубеж).
+end note
+
+@enduml

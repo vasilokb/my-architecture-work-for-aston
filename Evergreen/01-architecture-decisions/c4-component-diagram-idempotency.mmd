@@ -1,0 +1,76 @@
+graph TB
+    B[Банк-клиент<br>Idempotency-Key: request_id<br>дедуп входящих вебхуков по event_id]
+
+    subgraph "АБС-платформа"
+        GW[API Gateway<br>auth, rate-limit, tenant_id]
+
+        subgraph "Сервисы (синхронные REST)"
+            CD[credit-decision<br>POST /api/v1/applications]
+            LI[loan-issuance<br>POST /api/v1/loans/issue]
+            LS[loan-signing<br>POST /sign/initiate<br>POST /sign/confirm]
+            ACC[accounting<br>POST /api/v1/accounting/transactions]
+        end
+
+        subgraph "Асинхронный фасад"
+            ASYNC[POST /api/v1/async/operations<br>+ GET /async/operations/request_id<br>статус/результат по request_id]
+            DB[(async_operations — inbox/outbox<br>PK: tenant_id + request_id<br>ACCEPTED → TASK_PUBLISHED →<br>COMPLETED/FAILED → NOTIFIED)]
+            RELAY[Task Relay<br>poll ACCEPTED → паблиш в async-tasks<br>FOR UPDATE SKIP LOCKED]
+            RCON[Result Consumer<br>читает async-results<br>UPDATE таблицы по request_id<br>WHERE TASK_PUBLISHED<br>повтор → no-op]
+            WHS[Webhook Sender — фоновый<br>poll COMPLETED/FAILED из таблицы<br>отправляет HTTP в банк<br>ретраи + HMAC + event_id<br>исчерпание ретраев → DLQ<br>успех → NOTIFIED]
+        end
+
+        subgraph "Kafka (топики)"
+            K_TASKS[async-tasks — задачи<br>message_id, request_id, tenant_id]
+            K_RESULT[async-results — ответный топик<br>message_id, request_id, tenant_id, result]
+            K_TASKS_DLQ[async-tasks.dlq<br>задачи после исчерпания ретраев]
+            K_RESULT_DLQ[async-results.dlq<br>битые результаты:<br>десериализация, неизвестный request_id]
+        end
+
+        subgraph "DLQ вебхуков (таблица)"
+            DLQ_W[(webhook_dead_letters<br>операция, попытки, последняя ошибка)]
+        end
+
+        subgraph "Эксплуатация DLQ"
+            REPLAY[Replay CLI / Admin UI<br>реплей с теми же message_id / event_id<br>реплей вебхука → снова в очередь отправки]
+        end
+
+        subgraph "Consumer (основной)"
+            CON[Consumer задач<br>читает async-tasks<br>вызывает REST сервисов]
+        end
+    end
+
+    B-->|REST| GW
+
+    GW -->|синхронно| CD
+    GW -->|синхронно| LI
+    GW -->|синхронно| LS
+    GW -->|синхронно| ACC
+    GW -->|асинхронно 202| ASYNC
+    B -.->|опрос статуса| GW
+    GW -.->|GET статус| ASYNC
+
+    ASYNC -->|INSERT ACCEPTED, коммит → 202| DB
+    ASYNC -.->|дубль request_id → PK conflict → тот же 202| DB
+
+    RELAY -->|взять ACCEPTED| DB
+    RELAY -->|кладёт| K_TASKS
+
+    CON -->|читает| K_TASKS
+    CON -->|вызывает REST внутренний<br>X-Message-Id + inbox в сервисе:<br>дубль → кэш ответа| CD
+    CON -->|вызывает REST внутренний<br>X-Message-Id + inbox в сервисе:<br>дубль → кэш ответа| LI
+    CON -->|вызывает REST внутренний<br>X-Message-Id + inbox в сервисе:<br>дубль → кэш ответа| LS
+    CON -->|вызывает REST внутренний<br>X-Message-Id + inbox в сервисе:<br>дубль → кэш ответа| ACC
+
+    CON -->|публикует ответ/ошибку| K_RESULT
+    CON -->|ретраи исчерпаны / poison → DLQ<br>и одновременно FAILED в async-results| K_TASKS_DLQ
+
+    RCON -->|читает| K_RESULT
+    RCON -->|UPDATE status, result| DB
+    RCON -->|нереобрабатываемое → DLQ| K_RESULT_DLQ
+
+    WHS -->|poll COMPLETED/FAILED| DB
+    WHS -->|отправляет вебхук + event_id| B
+    WHS -->|исчерпание ретраев| DLQ_W
+
+    REPLAY -.->|вернуть в async-tasks| K_TASKS
+    REPLAY -.->|перезапуск доставки| WHS

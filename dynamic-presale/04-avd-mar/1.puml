@@ -1,0 +1,40 @@
+@startuml C2_Container_Diagram_VPN
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+skinparam backgroundColor transparent
+
+LAYOUT_WITH_LEGEND()
+
+' Сетевые зоны
+Boundary(WAN, "WAN", "Интернет") {
+  Person(consultant, "Консультант\nпресейлов", "Подключается через VPN")
+  Person(manager, "Руководитель\nпроекта", "Подключается через VPN")
+  System_Ext(vpn_gateway, "VPN Gateway", "Корпоративный VPN")
+}
+
+Boundary(LAN, "LAN", "Внутренняя сеть") {
+  Container(frontend, "Frontend", "React/TypeScript", "Веб-интерфейс, 6 экранов")
+  Container(api_gateway, "API Gateway", "Nginx", "Маршрутизация API, rate limiting")
+  Container(backend, "Backend Monolith", "Spring Boot 3.x", "Модульный монолит, 9 компонентов")
+  ContainerDb(postgres, "PostgreSQL", "PostgreSQL 15+", "Основное хранилище данных")
+  ContainerDb(minio, "Object Storage", "MinIO", "S3-совместимое хранилище файлов")
+  System_Ext(keycloak, "Keycloak", "Аутентификация, управление пользователями")
+}
+
+Boundary(External, "External", "Внешние API") {
+  System_Ext(llm_provider, "External LLM API", "OpenAI/Anthropic/Ollama")
+}
+
+' Связи с учётом VPN
+Rel(consultant, vpn_gateway, "Устанавливает защищённое\nVPN-соединение", "IPSec/OpenVPN")
+Rel(manager, vpn_gateway, "Устанавливает защищённое\nVPN-соединение", "IPSec/OpenVPN")
+
+Rel(vpn_gateway, frontend, "Доступ после аутентификации", "HTTPS (443)")
+Rel_R(frontend, api_gateway, "Вызывает API", "HTTP (8080)")
+Rel_D(api_gateway, backend, "Проксирует запросы", "HTTP (8080)")
+
+Rel_R(api_gateway, keycloak, "Валидирует JWT токены", "HTTPS (8443)")
+Rel_R(backend, llm_provider, "Вызывает AI-модели", "HTTPS (443)")
+Rel(backend, postgres, "Читает/записывает данные", "JDBC (5432)")
+Rel(backend, minio, "Сохраняет/читает файлы", "S3 API (9000)")
+
+@enduml

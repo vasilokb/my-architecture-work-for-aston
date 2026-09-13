@@ -1,0 +1,57 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма - MVP поиска вакансий для уходящих сотрудников (v2)
+
+LAYOUT_TOP_DOWN()
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 40
+
+' === АКТОРЫ ===
+Person(careerConsultant, "Карьерный Консультант", "Формирует профили позиций, управляет доступом уходящих сотрудников")
+
+Person(employee, "Уходящий Сотрудник", "Ищет релевантные вакансии по сформированному профилю позиции")
+
+' === СИСТЕМА ===
+System_Boundary(careerAggregator, "Career Aggregator System (MVP)") {
+
+    Container(webApp, "Web Application", "Streamlit", "Интерфейс: форма профиля позиции, список вакансий, панель администратора")
+
+    Container(apiGateway, "API Gateway", "FastAPI", "Прием запросов, аутентификация, маршрутизация, rate limiting")
+
+    Container(searchService, "Search Service", "Python/FastAPI", "Основной сервис: формирование запроса к HH.ru на основе профиля позиции, семантическое ранжирование")
+
+    Container(profileService, "Profile Service", "Python/FastAPI", "Управление профилями позиций: создание, редактирование, хранение")
+
+    ContainerDb(postgres, "PostgreSQL", "PostgreSQL", "Хранение: профили позиций, пользователи, история запросов, результаты поиска")
+
+    ContainerDb(cache, "Redis", "Redis", "Кэширование: LLM-ответы, эмбеддинги, результаты поиска, сессии")
+
+    Container(embeddingEngine, "Embedding Engine", "Sentence-Transformers", "Генерация эмбеддингов для ранжирования (all-MiniLM-L6-v2)")
+}
+
+' === ВНЕШНИЕ СИСТЕМЫ ===
+System_Ext(deepseek, "DeepSeek API", "LLM для преобразования профиля позиции в структурированные параметры для HH.ru")
+
+System_Ext(headHunter, "HH.ru API", "Источник вакансий (поиск в реальном времени)")
+
+' === СВЯЗИ ===
+Rel(careerConsultant, webApp, "Создает/редактирует профили позиций, управляет доступом", "HTTPS")
+Rel(employee, webApp, "Выбирает профиль позиции, получает вакансии", "HTTPS")
+
+Rel(webApp, apiGateway, "POST /api/search, POST /api/profile", "HTTPS/REST")
+
+Rel(apiGateway, searchService, "Вызывает поиск по профилю позиции", "REST")
+Rel(apiGateway, profileService, "Управление профилями позиций", "REST")
+
+Rel(searchService, deepseek, "Преобразование профиля позиции в параметры для HH.ru", "HTTPS")
+Rel(searchService, headHunter, "Поиск вакансий по параметрам", "HTTPS")
+Rel(searchService, embeddingEngine, "Генерация эмбеддингов", "in-process")
+Rel(searchService, cache, "Чтение/запись кэша", "TCP")
+
+Rel(profileService, postgres, "Чтение/запись профилей позиций", "TCP")
+Rel(apiGateway, postgres, "Чтение/запись пользователей", "TCP")
+Rel(apiGateway, cache, "Кэширование сессий", "TCP")
+
+@enduml

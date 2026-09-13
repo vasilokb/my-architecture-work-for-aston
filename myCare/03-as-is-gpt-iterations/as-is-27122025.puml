@@ -1,0 +1,113 @@
+@startuml
+!theme plain
+
+package "HTTP Layer" {
+  [InsuranceApplicationController]
+  [PolicyController]
+}
+
+package "Service Layer" {
+  [InsuranceApplicationService]
+  [PolicyService]
+  [ClientService]
+  [OutboxService]
+  [TopicService]
+}
+
+package "Event System" {
+  database "Outbox Table" {
+    [Outbox Events]
+  }
+
+  [Event Publisher]
+
+  queue "Kafka Topics" {
+    [client-events]
+    [application-events]
+    [policy-events]
+  }
+
+  [ClientEventConsumer]
+}
+
+package "Data Layer" {
+  [InsuranceApplication\nRepository]
+  [Policy Repository]
+  [Client Repository]
+}
+
+package "External Systems" {
+  [External Services]
+  [Notification Service]
+  [Analytics Service]
+}
+
+' === ВЗАИМОДЕЙСТВИЯ ===
+
+' HTTP → Service
+[InsuranceApplicationController] --> [InsuranceApplicationService]
+[PolicyController] --> [PolicyService]
+
+' Service → Data
+[InsuranceApplicationService] --> [InsuranceApplication\nRepository]
+[PolicyService] --> [Policy Repository]
+[ClientService] --> [Client Repository]
+
+' Service → Event Publisher
+[InsuranceApplicationService] --> [Event Publisher] : publish events
+[PolicyService] --> [Event Publisher] : publish events
+[ClientService] --> [Event Publisher] : publish events
+
+' Event Publisher → Outbox
+[Event Publisher] --> [Outbox Events] : store for reliability
+
+' Outbox → Kafka (async)
+[Outbox Events] --> [client-events] : OutboxCleanupScheduler
+[Outbox Events] --> [application-events] : OutboxCleanupScheduler
+[Outbox Events] --> [policy-events] : OutboxCleanupScheduler
+
+' Kafka → Consumers
+[client-events] --> [ClientEventConsumer]
+[application-events] --> [External Services]
+[policy-events] --> [Notification Service]
+
+' Service Dependencies
+[InsuranceApplicationService] --> [ClientService]
+[PolicyService] --> [InsuranceApplicationService]
+[OutboxService] --> [TopicService]
+
+' Error Handling
+[OutboxDltListener] --> [Outbox Events] : retry failed
+[OutboxEventAcknowledger] --> [Outbox Events] : confirm success
+
+' === ЛЕГЕНДА ЦВЕТОВ ===
+skinparam component {
+  BackgroundColor<<HTTP>> #FFE4B5
+  BackgroundColor<<Service>> #D8BFD8
+  BackgroundColor<<Event>> #AFEEEE
+  BackgroundColor<<Data>> #98FB98
+  BackgroundColor<<External>> #FFB6C1
+}
+
+[InsuranceApplicationController] <<HTTP>>
+[PolicyController] <<HTTP>>
+
+[InsuranceApplicationService] <<Service>>
+[PolicyService] <<Service>>
+[ClientService] <<Service>>
+[OutboxService] <<Service>>
+
+[Event Publisher] <<Event>>
+[Outbox Events] <<Event>>
+
+[ClientEventConsumer] <<Event>>
+
+[InsuranceApplication\nRepository] <<Data>>
+[Policy Repository] <<Data>>
+[Client Repository] <<Data>>
+
+[External Services] <<External>>
+[Notification Service] <<External>>
+[Analytics Service] <<External>>
+
+@enduml

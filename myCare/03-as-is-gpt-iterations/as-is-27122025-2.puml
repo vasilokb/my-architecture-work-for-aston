@@ -1,0 +1,342 @@
+@startuml
+!theme plain
+
+title "Event-Driven Архитектура с Outbox Pattern и Bulkhead"
+caption "Основной принцип: HTTP запросы обрабатываются быстро,\nдолгие операции выполняются асинхронно через события\nДобавлен Bulkhead для изоляции ресурсов\nДобавлены программы ДМС (DmsProgram) как часть доменной модели"
+
+package "HTTP Layer" {
+  [InsuranceApplicationController]
+  note right of InsuranceApplicationController
+    <b>controller/insuranceapplication/</b>
+    InsuranceApplicationController.java
+    --
+    Принимает HTTP запросы:
+    • POST /applications
+    • PUT /applications/{id}/status
+    • GET /applications/{id}
+  end note
+
+  [PolicyController]
+  note left of PolicyController
+    <b>controller/policy/</b>
+    PolicyController.java
+    --
+    Принимает HTTP запросы:
+    • POST /policies
+    • PUT /policies/{id}/status
+    • GET /policies/{id}
+  end note
+}
+
+package "Service Layer" {
+  [InsuranceApplicationService]
+  note right of InsuranceApplicationService
+    <b>service/insuranceapplication/</b>
+    InsuranceApplicationService.java
+    --
+    1. Валидация данных
+    2. Проверка клиента
+    3. Сохранение в БД
+    4. Публикация события
+    --
+    Включает обработку программ ДМС (DmsProgram) для валидации заявок.
+    --
+    <color:red>Доработка для Bulkhead:</color>
+    Аннотировать методы с вызовами внешних сервисов (Feign) @Bulkhead(name="externalCalls", type=BulkheadType.THREADPOOL)
+    --
+    <color:red>Bulkhead паттерн:</color>
+    @Bulkhead(name="externalCalls", type=THREADPOOL)
+    maxConcurrentCalls: 10
+    Отдельный пул потоков для внешних вызовов
+    --
+    Эффект: Изолирует ресурсы, предотвращая истощение всех потоков приложения при задержках в внешних сервисах; повышает устойчивость.
+    Без него: Медленный внешний сервис может заблокировать все потоки, приводя к отказу всего приложения (cascading failure).
+    Суть реализации: Resilience4J создает отдельный пул потоков (THREADPOOL) или семафор (SEMAPHORE) для ограничения параллельных вызовов; конфигурируется в application.yml.
+  end note
+
+  [PolicyService]
+  note left of PolicyService
+    <b>service/policy/</b>
+    PolicyService.java
+    --
+    1. Проверка заявки
+    2. Расчет премии
+    3. Генерация полиса
+    4. Публикация события
+    --
+    Обработка программ ДМС (DmsProgram) для расчета и генерации полисов.
+    --
+    <color:red>Доработка для Bulkhead:</color>
+    Аннотировать методы с расчетом премии или внешними вызовами @Bulkhead(name="premiumCalc", type=BulkheadType.SEMAPHORE)
+    --
+    <color:red>Bulkhead паттерн:</color>
+    @Bulkhead(name="premiumCalc", type=SEMAPHORE)
+    maxConcurrentCalls: 5
+    Отдельный семафор для расчетов
+    --
+    Эффект: Ограничивает одновременные тяжелые операции, сохраняя ресурсы для других запросов; предотвращает перегрузку.
+    Без него: Тяжелые расчеты могут монополизировать CPU/память, замедляя или блокируя другие операции сервиса.
+    Суть реализации: Использует семафор для контроля количества одновременных выполнений; настраивается maxConcurrentCalls и maxWaitDuration.
+  end note
+
+  [ClientService]
+  note bottom of ClientService
+    <b>service/</b>
+    ClientService.java
+    --
+    • Получение данных клиента
+    • Обновление информации
+    • Ведение истории
+    --
+    <color:green>Уже неблокирующий:</color> Если использует @Async для обновлений.
+    <color:red>Доработка:</color> Добавить Bulkhead для клиентских API вызовов.
+    Цель: Изолировать вызовы к внешним клиентским сервисам.
+    --
+    Эффект: Защищает от перегрузки при множественных клиентских запросах; обеспечивает стабильность.
+    Без него: Задержки в клиентских API могут распространиться на весь сервис, вызывая таймауты.
+    Суть реализации: @Bulkhead аннотация на методах; отдельный пул для API вызовов.
+  end note
+
+  [OutboxService]
+  note top of OutboxService
+    <b>service/outbox/</b>
+    OutboxService.java
+    --
+    Паттерн Outbox:
+    • Сохраняет события в БД
+    • Гарантированная доставка
+    --
+    <color:green>Уже неблокирующий:</color> Сохранение в той же транзакции, не блокирует HTTP.
+  end note
+
+  [TopicService]
+  note bottom of TopicService
+    <b>service/topic/</b>
+    TopicService.java
+    --
+    Управление Kafka топиками
+  end note
+
+  [OutboxCleanupScheduler]
+  note bottom of OutboxCleanupScheduler
+    <b>service/outbox/</b>
+    OutboxCleanupScheduler.java
+    --
+    @Scheduled
+    Отправляет события из Outbox в Kafka
+    --
+    <color:green>Уже неблокирующий:</color> Работает в scheduler thread pool.
+    <color:red>Доработка:</color> Bulkhead для Kafka send, если множественные топики.
+    --
+    Эффект: Изолирует отправку сообщений, предотвращая влияние на другие фоновые задачи.
+    Без него: Массовые отправки могут заблокировать scheduler pool, задерживая другие задачи.
+    Суть реализации: @Bulkhead на методе отправки; THREADPOOL для асинхронных отправок в Kafka.
+  end note
+}
+
+package "Event System" {
+  database "Outbox Table" {
+    [Outbox Events]
+  }
+  note right of "Outbox Table"
+    События сохраняются здесь
+    в той же транзакции
+    что и основная операция
+    --
+    Статусы: PENDING/SENT/ERROR
+    --
+    <color:green>Уже неблокирующий:</color> Не влияет на HTTP поток.
+    --
+    <color:red>Оптимизации:</color>
+    • Индексы на (status, created_at)
+    • Batch size: 1000 → 5000+
+    • Партицирование по дате
+    Цель: Ускорить чтение для scheduler при большом объеме.
+  end note
+
+  [Event Publisher]
+  note left of "Event Publisher"
+    Spring ApplicationEventPublisher
+    --
+    Публикует события:
+    • InsuranceApplicationCreatedEvent
+    • PolicyCreatedEvent
+    • ClientCreateEvent
+    --
+    <color:red>Доработка:</color> Сделать публикацию @Async, чтобы не блокировать сервисный поток.
+    Цель: Перевести в неблокирующий режим.
+  end note
+
+  queue "Kafka Topics" {
+    [client-events]
+    [application-events]
+    [policy-events]
+  }
+
+  note right of "Kafka Topics"
+    <b>util/constants/</b>
+    KafkaConstants.java
+    --
+    • dms.client.events
+    • dms.application.events
+    • dms.policy.events
+    --
+    <color:green>Уже неблокирующий:</color> Async send с KafkaTemplate.
+  end note
+
+  [ClientEventConsumer]
+  note left of ClientEventConsumer
+    <b>kafka/consumer/client/</b>
+    ClientEventConsumer.java
+    --
+    @KafkaListener
+    Обновляет локальную БД клиентов
+    --
+    <color:green>Уже неблокирующий:</color> Работает в consumer thread pool.
+    <color:red>Доработка для Bulkhead:</color> Добавить @Bulkhead для методов обработки, если внутри долгие операции.
+    --
+    Эффект: Ограничивает ресурсы на обработку событий, защищая от перегрузки.
+    Без него: Долгие события могут истощить consumer pool, блокируя новые сообщения.
+    Суть реализации: @Bulkhead(type=THREADPOOL) на обработчике; отдельный пул для consumer задач.
+  end note
+}
+
+package "Data Layer" {
+  [InsuranceApplication\nRepository]
+  [Policy Repository]
+  [Client Repository]
+  [DmsProgram\nRepository]
+
+  note right of "Data Layer"
+    Репозитории не видны в структуре
+    но подразумеваются
+    --
+    JPA/Hibernate репозитории
+    для доступа к БД
+    --
+    Добавлен репозиторий для программ ДМС (DmsProgram), как часть каталога программ.
+    --
+    <color:red>Доработка:</color> Перейти на R2DBC для reactive DB access, чтобы избежать blocking IO.
+    Цель: Неблокирующий режим для DB запросов.
+    --
+    <color:red>Проблема пула:</color> При 100 RPS дефолтный пул в 10 соединений исчерпается.
+    Рекомендация: spring.datasource.hikari.maximum-pool-size: 50+
+    Цель: Поддержка высокой нагрузки без ожидания соединений.
+  end note
+}
+
+package "External Systems" {
+  [External Services]
+  [Notification Service]
+  [Analytics Service]
+
+  note top of "External Systems"
+    Внешние интеграции:
+    • Проверка КБМ
+    • Верификация документов
+    • Уведомления клиентов
+    --
+    Вызовы через Feign Clients.
+  end note
+}
+
+' === ВЗАИМОДЕЙСТВИЯ ===
+
+' HTTP → Service
+[InsuranceApplicationController] --> [InsuranceApplicationService] : "1. Быстрый запрос"
+[PolicyController] --> [PolicyService] : "1. Быстрый запрос"
+
+' Service → Data
+[InsuranceApplicationService] --> [InsuranceApplication\nRepository] : "2. Сохранение в БД\n<color:red>(blocking, доработать reactive)</color>"
+[PolicyService] --> [Policy Repository] : "2. Сохранение в БД\n<color:red>(blocking, доработать reactive)</color>"
+[ClientService] --> [Client Repository] : "Получение клиента"
+[PolicyService] --> [DmsProgram\nRepository] : "Доступ к программам ДМС"
+
+' Service → Event Publisher
+[InsuranceApplicationService] --> [Event Publisher] : "3. Публикация события\n<color:green>(неблокирующий, если @Async)</color>"
+[PolicyService] --> [Event Publisher] : "3. Публикация события\n<color:green>(неблокирующий, если @Async)</color>"
+[ClientService] --> [Event Publisher] : "Публикация события"
+
+' Event Publisher → Outbox
+[Event Publisher] --> [Outbox Events] : "4. Сохранение в Outbox\n<color:blue>(в той же транзакции)</color>"
+
+' Outbox → Kafka (async)
+[OutboxCleanupScheduler] --> [client-events] : "5. Отправка\n<color:orange>(фоновая задача)</color>"
+[OutboxCleanupScheduler] --> [application-events] : "5. Отправка"
+[OutboxCleanupScheduler] --> [policy-events] : "5. Отправка"
+
+' Kafka → Consumers
+[client-events] --> [ClientEventConsumer] : "6. @KafkaListener\n<color:red>(может быть долгим)</color>"
+[application-events] --> [External Services] : "6. Внешние проверки\n<color:green>(async consumer)</color>"
+[policy-events] --> [Notification Service] : "6. Уведомления\n<color:green>(async consumer)</color>"
+
+' Service Dependencies
+[InsuranceApplicationService] --> [ClientService] : "Проверка клиента"
+[PolicyService] --> [InsuranceApplicationService] : "Проверка заявки"
+[OutboxService] --> [TopicService] : "Получение топиков"
+
+' Error Handling
+[OutboxDltListener] --> [Outbox Events] : "retry failed"
+[OutboxEventAcknowledger] --> [Outbox Events] : "confirm success"
+
+note top of OutboxDltListener
+  <b>consumer/outbox/</b>
+  OutboxDltListener.java
+  --
+  Обработка Dead Letter Topic
+  Повторная отправка
+  --
+  <color:green>Уже неблокирующий:</color> DLT обработка async.
+end note
+
+' Outbox Scheduler
+[OutboxCleanupScheduler] --> [Outbox Events] : "Чтение pending"
+[OutboxCleanupScheduler] --> "Kafka Topics" : "Отправка"
+
+' === ЛЕГЕНДА ЦВЕТОВ ===
+skinparam component {
+  BackgroundColor<<HTTP>> #FFE4B5
+  BackgroundColor<<Service>> #D8BFD8
+  BackgroundColor<<Event>> #AFEEEE
+  BackgroundColor<<Data>> #98FB98
+  BackgroundColor<<External>> #FFB6C1
+  BackgroundColor<<Resiliency>> #FFD700
+}
+
+[InsuranceApplicationController] <<HTTP>>
+[PolicyController] <<HTTP>>
+
+[InsuranceApplicationService] <<Service>>
+[PolicyService] <<Service>>
+[ClientService] <<Service>>
+[OutboxService] <<Service>>
+[OutboxCleanupScheduler] <<Service>>
+
+[Event Publisher] <<Event>>
+[Outbox Events] <<Event>>
+
+[ClientEventConsumer] <<Event>>
+
+[InsuranceApplication\nRepository] <<Data>>
+[Policy Repository] <<Data>>
+[Client Repository] <<Data>>
+[DmsProgram\nRepository] <<Data>>
+
+[External Services] <<External>>
+[Notification Service] <<External>>
+[Analytics Service] <<External>>
+
+legend right
+  <b>Нумерованный поток:</b>
+  1. HTTP запрос (быстрый)
+  2. Работа с БД (быстрый)
+  3. Публикация события (неблок.)
+  4. Outbox сохранение
+  5. Фоновая отправка в Kafka
+  6. Асинхронная обработка
+  --
+  <color:green>Зеленый:</color> Уже неблокирующий
+  <color:red>Красный:</color> Нужно доработать для async/reactive
+endlegend
+
+@enduml

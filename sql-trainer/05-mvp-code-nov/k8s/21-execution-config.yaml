@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: execution-db
+  namespace: sql-trainer
+type: Opaque
+stringData:
+  DB_HOST: training-postgres.sql-trainer.svc.cluster.local
+  DB_PORT: "5432"
+  DB_NAME: training
+  DB_USER: trainero
+  DB_PASSWORD: change_me_ro_pass
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: execution-config
+  namespace: sql-trainer
+data:
+  # Максимальный timeout выполнения (мс)
+  EXECUTION_TIMEOUT_MS: "1000"
+  # Авто-LIMIT на SELECT, если пользователь не указал
+  EXECUTION_AUTO_LIMIT: "200"
+  # Разрешены только SELECT-запросы
+  EXECUTION_ALLOW_ONLY_SELECT: "true"
