@@ -6,7 +6,8 @@ import hashlib
 import re
 from math import ceil
 
-API_KEY = "pplx-[redacted]"
+import os
+API_KEY = os.getenv("PERPLEXITY_API_KEY", "")
 
 PROFILE_ID = 4
 

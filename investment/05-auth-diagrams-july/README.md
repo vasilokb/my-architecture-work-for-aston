@@ -104,7 +104,7 @@ Redis-хранилище `tokens:{customerId}`). Это legacy-путь, час�
 Заимствовано из `ARCHITECTURE-OVERVIEW.md §12.4` и подтверждено кодом:
 
 1. **Пароли сотрудников хранятся в открытом виде** — `CredentialsEntity.password`, сравнение `equals()` в `AuthEmployeeServiceImpl.editPassword` и `AuthVerificationServiceImpl.checkAttempts`. Клиентские пароли при этом — BCrypt.
-2. **Захардкоженные секреты** — JWT-секрет auth-service по умолчанию `[redacted]` (`application-dev.yaml`), Keycloak-админ `[redacted]` в api-gateway.
+2. **Захардкоженные секреты** — JWT-секреты и Keycloak-credentials в конфигурациях по умолчанию (`application-dev.yaml`, `api-gateway`) — см. AUDIT-REPORT 1.1.
 3. **`.block()` в реактивном API Gateway** — `JwtFilter`/`AuthJwtFilter` блокируют Netty event-loop thread → каскадные задержки под нагрузкой.
 4. **Симметричная подпись HS256** — любой downstream-сервис, знающий секрет, может выпускать валидные токены (RS256/асимметрия не используется).
 5. **Отзыв токена = флаг-строка** `"logout"` в БД, без blacklist по `jti`; одна `Session` на сотрудника (вход с нового устройства перезаписывает сессию).

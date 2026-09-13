@@ -150,8 +150,6 @@ note bottom of u_jwt #F4B400
   <b>Риски инфраструктуры:</b>
    • HS256 — симметричная подпись (любой downstream
      с секретом может выпускать токены).
-   • JWT-секрет по умолчанию захардкожен:
-     [redacted].
    • Пароль сотрудника сравнивается как plaintext
      (CredentialsService, без BCrypt).
    • Отзыв токена = строка "logout" в Session, без blacklist jti.

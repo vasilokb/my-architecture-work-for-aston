@@ -657,7 +657,7 @@ Gateway выполняет **минимальную трансформацию**
 | # | Проблема | Где | Влияние |
 |---|---|---|---|
 | 1 | **Outbox отключён** | `trading-service`: `sendBatchMessages()` закомментирован | События изменения статуса ордеров (executed, rejected, expired, cancelled) **никогда не публикуются** в Kafka → account-service не узнаёт об исполнении ордеров |
-| 2 | **Hardcoded credentials** | `api-gateway/application.yaml` (Keycloak admin `[redacted]`), `auth-service/application-dev.yaml` (JWT `[redacted]`), `customercare-service/application.yaml` (JWT `[redacted]` без env fallback), 6+ `build.gradle` (Nexus `[redacted]`), `react-service/.env` (JWT token) | Детальный разбор — см. `AUDIT-REPORT.md` раздел 1.1 |
+| 2 | **Hardcoded credentials** | Захардкоженные секреты в `api-gateway/application.yaml`, `auth-service`, `customercare-service`, 6+ `build.gradle` (Nexus), `react-service/.env` — полный список в `AUDIT-REPORT.md` раздел 1.1 | Детальный разбор — см. `AUDIT-REPORT.md` раздел 1.1 |
 | 3 | **Shared database** | `account-service` + `account-service-test` → одна БД `account_service_db` | Нарушение database-per-service, конкурентные записи |
 | 4 | **Misconfiguration** | `criticalfeedbackchannel`: `application.yaml` — copy-paste от financialtransactions-service | Сервис подключается к чужой БД `release_financialtransactions_service_db` вместо своей |
 | 5 | **`.block()` в WebFlux** | API Gateway: `JwtFilter`, `AuthJwtFilter` | Блокировка Netty event loop thread → каскадные задержки под нагрузкой |

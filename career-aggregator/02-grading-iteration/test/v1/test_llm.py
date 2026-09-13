@@ -3,7 +3,8 @@ import json
 import time
 
 # Твой API ключ Perplexity
-API_KEY = "pplx-[redacted]"
+import os
+API_KEY = os.getenv("PERPLEXITY_API_KEY", "")
 
 # 1. Получаем вакансии из HH.ru
 print("1. Получаем вакансии из HH.ru...")

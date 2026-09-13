@@ -7,7 +7,8 @@ from perplexity import Perplexity
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-API_KEY = "pplx-[redacted]"
+import os
+API_KEY = os.getenv("PERPLEXITY_API_KEY", "")
 
 CONFIG = {
     'retry_attempts': 3,

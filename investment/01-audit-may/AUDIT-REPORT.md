@@ -30,17 +30,17 @@
 
 ### 1.1. Hardcoded Credentials (CRITICAL)
 
-Найдены следующие секреты в исходном коде *(значения замаскированы при публикации; в исходном аудите приведены полностью)*:
+В исходном коде найдены захардкоженные секреты (значения в публичную копию не включены):
 
-| Секрет | Файл | Значение |
-|--------|------|----------|
-| Keycloak admin password | `api-gateway/application.yaml` | `[redacted]` (fallback, 9 символов) |
-| Keycloak client secret | `api-gateway/application.yaml` | `[redacted]` (fallback, 31 символ) |
-| Nexus password | 6+ `build.gradle` файлов | `[redacted]` (fallback) |
-| JWT secret (admin) | `auth-service/application-dev.yaml` | `[redacted]` (словарное значение) |
-| JWT secret (client) | `document-service-pb/application.yaml`, `account-service-test/application.yaml` | `[redacted]` (hex-ключ) |
-| JWT secret (customercare) | `customercare-service/application.yaml` | `[redacted]` (**без env fallback**) |
-| Frontend JWT token | `react-service/.env` | `[redacted]` (JWT-токен) |
+| Секрет | Файл |
+|--------|------|
+| Keycloak admin password (fallback) | `api-gateway/application.yaml` |
+| Keycloak client secret (fallback) | `api-gateway/application.yaml` |
+| Nexus password (fallback) | 6+ `build.gradle` файлов |
+| JWT secret (admin) | `auth-service/application-dev.yaml` |
+| JWT secret (client) | `document-service-pb/application.yaml`, `account-service-test/application.yaml` |
+| JWT secret (customercare) | `customercare-service/application.yaml` (**без env fallback**) |
+| Frontend JWT token | `react-service/.env` |
 
 **Рекомендация:** Немедленно удалить все fallback-значения секретов. Использовать только env variables без defaults.
 
@@ -496,16 +496,16 @@ trading-service [backend] --Kafka--> account-service [client]
 ### 11.5. Все hardcoded credentials
 
 ```
-1. api-gateway: Keycloak admin=admin, password=[redacted], client_secret=[redacted]
+1. api-gateway: Keycloak admin + password + client_secret
 2. api-gateway: Nexus credentials in build.gradle.kts
-3. auth-service: JWT secret key fallback=[redacted]
-4. document-service-pb: JWT secret=[redacted]
-5. account-service-test: JWT secret=[redacted]
-6. customercare-service: JWT secret=[redacted] (БЕЗ env fallback)
+3. auth-service: JWT secret key fallback
+4. document-service-pb: JWT secret
+5. account-service-test: JWT secret
+6. customercare-service: JWT secret (БЕЗ env fallback)
 7. support-service: Nexus credentials in build.gradle
 8. customer-service: Nexus credentials (in build.gradle)
 9. otp-service: Nexus credentials (in build.gradle)
-10. react-service/.env: VITE_API_TOKEN=[redacted]
+10. react-service/.env: VITE_API_TOKEN
 11. AQA test data: потенциально реальные credentials в CSV файлах
 ```
 
