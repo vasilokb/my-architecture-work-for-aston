@@ -87,9 +87,11 @@ google-sheets-example.html.
 PostgreSQL/pgvector; домены access / profile / taxonomy / vacancies / matching /
 analytics; инварианты границ; ADR-001..004 по выборам), `architecture_v1.1.0.puml`,
 `architecture_v1.2.0.puml`, `matching-flow-no-llm.puml`.
-Прототип (`prototype-vector/`): docker-compose + init.sql + загрузка данных +
-`battle-examples.sql` + `plan.md` — проверка векторного поиска на реальных
-данных за 5 дней (03–07.09).
+Прототип (`prototype-vector/`, 10 файлов) — **полностью работа Василия:
+код, SQL, данные, план и README**; рабочий прототип векторного поиска на
+pgvector, проверка на реальных данных за 5 дней (03–07.09). Датировки
+файлов перекрёстно подтверждаются перепиской C9/C10: создан как «затравка»
+в ответ на сомнения команды в pgvector, доработан к созвону 07.09.
 
 ## Что доказывает пакет
 
